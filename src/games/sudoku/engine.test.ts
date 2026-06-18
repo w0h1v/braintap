@@ -12,9 +12,12 @@ import {
   getHint,
 } from "./engine";
 import { getDailyPuzzle } from "./generator";
+import type { Difficulty } from "@/lib/types";
 
 const START = "2025-01-01";
 const SAMPLE = 200; // ~6+ months of daily puzzles
+const TIERS: Difficulty[] = ["easy", "medium", "hard"];
+const TIER_DAYS = 120; // consecutive days checked per tier
 
 function fullyValidGrid(g: number[]): boolean {
   if (findConflicts(g).some(Boolean)) return false;
@@ -81,6 +84,56 @@ describe("sudoku daily puzzles are solvable (solvable bank)", () => {
     const i = wrong.findIndex((_, k) => !p.given[k]);
     wrong[i] = (wrong[i] % 6) + 1;
     expect(isSolved(wrong, p.solution)).toBe(false);
+  });
+});
+
+describe("sudoku difficulty tiers", () => {
+  it(`every tier across ${TIER_DAYS} consecutive days is well-formed + uniquely solvable`, () => {
+    for (const d of TIERS) {
+      let date = START;
+      for (let i = 0; i < TIER_DAYS; i++) {
+        const p = getDailyPuzzle(date, d);
+
+        // solution is a complete valid grid
+        expect(fullyValidGrid(p.solution), `${d} solution invalid on ${date}`).toBe(true);
+
+        // givens match the solution; non-givens empty
+        for (let c = 0; c < CELLS; c++) {
+          if (p.given[c]) expect(p.puzzle[c]).toBe(p.solution[c]);
+          else expect(p.puzzle[c]).toBe(0);
+        }
+
+        // exactly one solution
+        expect(countSolutions(p.puzzle.slice(), 2), `${d} not unique on ${date}`).toBe(1);
+
+        // module validator agrees (well-formed + unique solution)
+        expect(validateSudoku(p), `${d} validator failed on ${date}`).toBe(true);
+
+        date = addDays(date, 1);
+      }
+    }
+  });
+
+  it("is deterministic per (date, difficulty) and tiers differ on a given day", () => {
+    const a = getDailyPuzzle("2025-03-14", "hard");
+    const b = getDailyPuzzle("2025-03-14", "hard");
+    expect(a.puzzle).toEqual(b.puzzle);
+
+    const easy = getDailyPuzzle("2025-03-14", "easy");
+    const hard = getDailyPuzzle("2025-03-14", "hard");
+    expect(easy.puzzle).not.toEqual(hard.puzzle);
+  });
+
+  it("easy averages more givens (clues) than hard over the sampled days", () => {
+    let easyTotal = 0;
+    let hardTotal = 0;
+    let date = START;
+    for (let i = 0; i < TIER_DAYS; i++) {
+      easyTotal += getDailyPuzzle(date, "easy").clues;
+      hardTotal += getDailyPuzzle(date, "hard").clues;
+      date = addDays(date, 1);
+    }
+    expect(easyTotal / TIER_DAYS).toBeGreaterThan(hardTotal / TIER_DAYS);
   });
 });
 

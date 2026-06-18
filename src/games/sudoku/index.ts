@@ -10,4 +10,5 @@ export default defineGame<SudokuPuzzle, any>({
   getDailyPuzzle,
   Component: Sudoku,
   validatePuzzle: validateSudoku,
+  supportsDifficulty: true,
 });

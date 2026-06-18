@@ -57,6 +57,7 @@ export function Sudoku({
   savedState,
   onPersistState,
   reducedMotion = false,
+  hostTimer = false,
 }: GameComponentProps<SudokuPuzzle, SudokuState>) {
   const saved = savedState ?? null;
   const [entries, setEntries] = useState<number[]>(
@@ -385,9 +386,14 @@ export function Sudoku({
         <span className="tabular-nums tracking-[0.12em]" style={{ color: ACCENT.soft }}>
           {filledCount}/{CELLS}
         </span>
-        <span aria-hidden className="tabular-nums tracking-[0.1em]">
-          {formatClock(won ? finalMsRef.current : clock.ms)}
-        </span>
+        {/* The GameHost renders a unified timer when hostTimer is true, so we
+            suppress our own chip to avoid duplication. Timing LOGIC (clock,
+            finalMsRef, result.timeMs) stays intact regardless. */}
+        {!hostTimer && (
+          <span aria-hidden className="tabular-nums tracking-[0.1em]">
+            {formatClock(won ? finalMsRef.current : clock.ms)}
+          </span>
+        )}
       </div>
 
       {/* progress bar */}

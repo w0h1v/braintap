@@ -9,6 +9,7 @@
  */
 
 import type { Rng } from "@/lib/rng";
+import type { Difficulty } from "@/lib/types";
 
 /** The four difficulty/colour tiers, in solve-reveal order (easy → hard). */
 export const GROUP_COLORS = ["#ffb020", "#7CF5C4", "#00e5ff", "#ff2bd6"] as const;
@@ -18,7 +19,22 @@ export const GROUP_EMOJI = ["🟨", "🟩", "🟦", "🟪"] as const;
 export const GROUP_COUNT = 4;
 export const GROUP_SIZE = 4;
 export const TILE_COUNT = GROUP_COUNT * GROUP_SIZE; // 16
+/**
+ * Legacy default mistake allowance. Kept exported for backward-compat, but it is
+ * no longer the source of truth — the live limit comes from `puzzle.maxMistakes`
+ * which varies per difficulty tier (see {@link DIFFICULTY_RULES}).
+ */
 export const MAX_MISTAKES = 4;
+
+/** Per-tier leniency: mistake allowance + whether near-miss feedback is shown. */
+export const DIFFICULTY_RULES: Record<
+  Difficulty,
+  { maxMistakes: number; oneAway: boolean }
+> = {
+  easy: { maxMistakes: 6, oneAway: true },
+  medium: { maxMistakes: 4, oneAway: true },
+  hard: { maxMistakes: 3, oneAway: false },
+};
 
 /** A curated category in the pool: a theme plus its candidate member terms. */
 export interface PoolCategory {
@@ -43,6 +59,10 @@ export interface ConnectionsPuzzle {
   groups: PuzzleGroup[];
   /** All 16 words in their deterministic shuffled board order. */
   tiles: string[];
+  /** Allowed wrong guesses before the game is lost (1..8, per difficulty tier). */
+  maxMistakes: number;
+  /** Whether to surface the "one away" near-miss feedback (off on hard). */
+  oneAway: boolean;
 }
 
 /**
@@ -326,8 +346,16 @@ export function hasCrossMembership(
  * Deterministically build a daily puzzle from a seeded RNG. Picks 4 distinct
  * categories, draws 4 words from each, enforces uniqueness + the ambiguity
  * guard, then shuffles all 16 tiles. Retries deterministically until valid.
+ *
+ * The 4×4 board structure is identical across tiers; difficulty only changes the
+ * mistake allowance and near-miss feedback. (A distinct daily board per tier is
+ * achieved upstream via a tier-specific seed — see the generator.)
  */
-export function buildPuzzle(rng: Rng): ConnectionsPuzzle {
+export function buildPuzzle(
+  rng: Rng,
+  difficulty: Difficulty = "medium",
+): ConnectionsPuzzle {
+  const { maxMistakes, oneAway } = DIFFICULTY_RULES[difficulty];
   for (let attempt = 0; attempt < 200; attempt++) {
     const order = rng.shuffle([...POOL.keys()]);
     const picks = order.slice(0, GROUP_COUNT).map((k) => POOL[k]);
@@ -352,7 +380,7 @@ export function buildPuzzle(rng: Rng): ConnectionsPuzzle {
     }));
 
     const tiles = rng.shuffle(groups.flatMap((g) => g.words));
-    return { groups, tiles };
+    return { groups, tiles, maxMistakes, oneAway };
   }
   throw new Error("connections: failed to build a valid puzzle");
 }
@@ -409,6 +437,17 @@ export function getHint(
 export function validateConnections(p: ConnectionsPuzzle): boolean {
   if (!p || !Array.isArray(p.groups) || p.groups.length !== GROUP_COUNT) return false;
   if (!Array.isArray(p.tiles) || p.tiles.length !== TILE_COUNT) return false;
+
+  // Difficulty leniency fields: maxMistakes is an integer in 1..8; oneAway bool.
+  if (
+    typeof p.maxMistakes !== "number" ||
+    !Number.isInteger(p.maxMistakes) ||
+    p.maxMistakes < 1 ||
+    p.maxMistakes > 8
+  ) {
+    return false;
+  }
+  if (typeof p.oneAway !== "boolean") return false;
 
   const seen = new Set<string>();
   for (let i = 0; i < p.groups.length; i++) {

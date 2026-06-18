@@ -9,20 +9,15 @@ import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
 import {
   CELLS,
-  DEFAULT_SIZE,
   SIZE,
-  SIZES,
   cellsFor,
   isComplete,
   isCorrectTap,
-  isSchulteSize,
   scoreForTime,
   starsForTime,
   titleForTime,
-  type SchulteSize,
   type SchultePuzzle,
 } from "./engine";
-import { getDailyPuzzleForSize } from "./generator";
 
 const ACCENT = GAME_METAS.schulte.accent;
 const INSIGHT =
@@ -40,9 +35,9 @@ interface SchulteState {
   bestMs: number | null;
   /** Whether the player has completed at least one table today. */
   playedToday: boolean;
-  /** Last-chosen grid size (3/5/7). Optional for old saves (default 5). */
+  /** Last-played grid size (3/5/7), driven by difficulty. */
   size?: number;
-  /** Best clear time per grid size, keyed by size. Optional for old saves. */
+  /** Best clear time per grid size, keyed by size. */
   bestBySize?: Partial<Record<number, number>>;
 }
 
@@ -65,30 +60,22 @@ const shareLine = (ms: number, size: number) =>
 
 export function Schulte({
   puzzle,
-  dateISO,
   onComplete,
   savedState,
   onPersistState,
   reducedMotion = false,
+  hostTimer = false,
 }: GameComponentProps<SchultePuzzle, SchulteState>) {
   const saved = savedState ?? null;
 
-  // Active grid size (3/5/7). Restore from the save when valid, else default 5×5.
-  const initialSize: SchulteSize = isSchulteSize(saved?.size)
-    ? saved!.size!
-    : DEFAULT_SIZE;
-  const [size, setSize] = useState<SchulteSize>(initialSize);
-
-  // The active grid layout. On first load it is the deterministic daily grid for
-  // the current size; a fresh local shuffle on each "Play again" / size change.
-  const [grid, setGrid] = useState<number[]>(() =>
-    initialSize === puzzle.size
-      ? puzzle.grid.slice()
-      : getDailyPuzzleForSize(dateISO, initialSize).grid.slice(),
-  );
-
+  // Size is driven by the difficulty the host selects, via the puzzle it passes.
+  const size = puzzle.size;
   // The high number for the active grid (size²).
   const max = cellsFor(size);
+
+  // The active grid layout: the deterministic daily grid for this difficulty on
+  // first load; a fresh local shuffle on each "Play again".
+  const [grid, setGrid] = useState<number[]>(() => puzzle.grid.slice());
 
   // The next number the player must tap (1..max). Idle until the table starts.
   const [next, setNext] = useState(1);
@@ -99,20 +86,24 @@ export function Schulte({
   const [popCell, setPopCell] = useState<number | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [lastMs, setLastMs] = useState(0);
-  const [lastSize, setLastSize] = useState<SchulteSize>(initialSize);
   const [completedAnyThisMount, setCompletedAnyThisMount] = useState(false);
 
   // Per-size best times (restored from save; back-compat with flat bestMs).
   const [bestBySize, setBestBySize] = useState<Partial<Record<number, number>>>(
     () => {
       const fromSaved = saved?.bestBySize ? { ...saved.bestBySize } : {};
-      if (saved?.bestMs != null && fromSaved[DEFAULT_SIZE] == null) {
-        fromSaved[DEFAULT_SIZE] = saved.bestMs;
+      if (saved?.bestMs != null && fromSaved[SIZE] == null) {
+        fromSaved[SIZE] = saved.bestMs;
       }
       return fromSaved;
     },
   );
   const bestForSize = bestBySize[size] ?? null;
+
+  // When the host switches difficulty, the puzzle (and its size) changes. Reset
+  // the in-progress table to the new deterministic daily grid.
+  const puzzleSig = `${size}:${puzzle.grid.join(",")}`;
+  const lastPuzzleSigRef = useRef(puzzleSig);
 
   const playedTodayRef = useRef<boolean>(saved?.playedToday ?? false);
   const onCompleteFiredRef = useRef(false);
@@ -126,7 +117,7 @@ export function Schulte({
   const persist = useCallback(
     (bests: Partial<Record<number, number>>, activeSize: number) => {
       onPersistState?.({
-        bestMs: bests[DEFAULT_SIZE] ?? null,
+        bestMs: bests[SIZE] ?? null,
         playedToday: playedTodayRef.current,
         size: activeSize,
         bestBySize: bests,
@@ -134,6 +125,13 @@ export function Schulte({
     },
     [onPersistState],
   );
+
+  const stopTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
 
   // Cleanup on unmount.
   useEffect(() => {
@@ -146,17 +144,24 @@ export function Schulte({
     };
   }, []);
 
+  // React to a difficulty/size switch from the host: reset to the new grid.
+  useEffect(() => {
+    if (lastPuzzleSigRef.current === puzzleSig) return;
+    lastPuzzleSigRef.current = puzzleSig;
+    stopTimer();
+    setGrid(puzzle.grid.slice());
+    setNext(1);
+    setRunning(false);
+    setElapsedMs(0);
+    setMessage("");
+    setCompletedAnyThisMount(false);
+    setShowModal(false);
+  }, [puzzleSig, puzzle.grid, stopTimer]);
+
   const flash = useCallback((text: string) => {
     setMessage(text);
     if (msgTimerRef.current) clearTimeout(msgTimerRef.current);
     msgTimerRef.current = setTimeout(() => setMessage(""), 1100);
-  }, []);
-
-  const stopTimer = useCallback(() => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
   }, []);
 
   const start = useCallback(
@@ -182,7 +187,6 @@ export function Schulte({
     const timeMs = Date.now() - t0Ref.current;
     setElapsedMs(timeMs);
     setLastMs(timeMs);
-    setLastSize(size);
     setRunning(false);
     setMessage("");
     haptics.win();
@@ -203,9 +207,9 @@ export function Schulte({
       reducedMotion ? 0 : 520,
     );
 
-    // Only the default 5×5 table counts as the daily play; fire onComplete once
-    // for its first clear. Other sizes are practice variants (no daily credit).
-    if (size === DEFAULT_SIZE && !onCompleteFiredRef.current) {
+    // Fire onComplete once for the first clear of this table. The host scores
+    // the active difficulty's clear; subsequent replays are practice.
+    if (!onCompleteFiredRef.current) {
       onCompleteFiredRef.current = true;
       onComplete({
         status: "won",
@@ -213,7 +217,7 @@ export function Schulte({
         timeMs,
         stars: starsForTime(timeMs, size),
         shareText: shareLine(timeMs, size),
-        detail: { bestMs: nextBests[DEFAULT_SIZE] ?? timeMs, size },
+        detail: { bestMs: nextBests[size] ?? timeMs, size },
       });
     }
   }, [bestBySize, onComplete, persist, reducedMotion, stopTimer, size]);
@@ -258,24 +262,6 @@ export function Schulte({
     setMessage("");
   }, [stopTimer]);
 
-  // Switch grid size: regenerate the deterministic daily grid for that size and
-  // reset progress. Disabled while a table is running.
-  const chooseSize = useCallback(
-    (s: SchulteSize) => {
-      if (running || s === size) return;
-      setSize(s);
-      setGrid(getDailyPuzzleForSize(dateISO, s).grid.slice());
-      setNext(1);
-      setElapsedMs(0);
-      setMessage("");
-      setCompletedAnyThisMount(false);
-      sfx.tap();
-      haptics.tap();
-      persist(bestBySize, s);
-    },
-    [running, size, dateISO, persist, bestBySize],
-  );
-
   // Keyboard: Enter/Space on the start button is native; allow Escape to abandon.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -302,58 +288,6 @@ export function Schulte({
       <span className="sr-only" aria-live="polite" role="status">
         {statusText}
       </span>
-
-      {/* size selector */}
-      <div
-        className={cn(
-          "mb-3 flex w-full items-center justify-center gap-1.5",
-          !reducedMotion && "animate-rise",
-        )}
-        style={{ maxWidth: BOARD_MAX }}
-        role="radiogroup"
-        aria-label="Grid size"
-      >
-        {SIZES.map((s) => {
-          const active = s === size;
-          const isDaily = s === DEFAULT_SIZE;
-          return (
-            <button
-              key={s}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              onClick={() => chooseSize(s)}
-              disabled={running}
-              className={cn(
-                "flex flex-1 flex-col items-center rounded-pill border px-3 py-1.5 font-display text-[13px] font-semibold outline-none",
-                "focus-visible:ring-2 focus-visible:ring-offset-0",
-                !reducedMotion && "transition-colors active:scale-[0.98]",
-                running && !active && "opacity-40",
-                running && "cursor-default",
-              )}
-              style={{
-                color: active ? "#04060f" : "#eafcff",
-                backgroundImage: active
-                  ? `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`
-                  : undefined,
-                background: active ? undefined : "rgba(255,255,255,0.05)",
-                borderColor: active ? "transparent" : "rgba(255,255,255,0.12)",
-                ["--tw-ring-color" as string]: ACCENT.solid,
-              }}
-            >
-              <span className="leading-none">{`${s}×${s}`}</span>
-              <span
-                className="mt-0.5 font-mono text-[8.5px] tracking-[0.12em]"
-                style={{
-                  color: active ? "rgba(4,6,15,0.7)" : ACCENT.soft,
-                }}
-              >
-                {isDaily ? "DAILY" : "PRACTICE"}
-              </span>
-            </button>
-          );
-        })}
-      </div>
 
       {/* stat boxes */}
       <div
@@ -383,20 +317,40 @@ export function Schulte({
             FIND NEXT
           </div>
         </div>
-        <div
-          className="flex flex-1 flex-col items-center rounded-2xl border px-4 py-2.5"
-          style={{ background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.1)" }}
-        >
+        {/* When the host owns the timer, show progress instead of a duplicate
+            clock; otherwise show the internal timer + per-size best. */}
+        {hostTimer ? (
           <div
-            className="font-display text-[26px] font-semibold leading-none tabular-nums"
-            style={{ color: "#ffb020" }}
+            className="flex flex-1 flex-col items-center rounded-2xl border px-4 py-2.5"
+            style={{ background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.1)" }}
           >
-            {formatSecs(displayMs)}
+            <div
+              className="font-display text-[26px] font-semibold leading-none tabular-nums"
+              style={{ color: "#eafcff" }}
+            >
+              {found}
+              <span className="text-[15px] text-[rgba(226,234,255,0.45)]">{`/${max}`}</span>
+            </div>
+            <div className="mt-1.5 font-mono text-[9.5px] tracking-[0.14em] text-[rgba(226,234,255,0.45)]">
+              {bestForSize != null ? `BEST ${formatSecs(bestForSize)}` : "FOUND"}
+            </div>
           </div>
-          <div className="mt-1.5 font-mono text-[9.5px] tracking-[0.14em] text-[rgba(226,234,255,0.45)]">
-            {bestForSize != null ? `BEST ${formatSecs(bestForSize)}` : "TIME"}
+        ) : (
+          <div
+            className="flex flex-1 flex-col items-center rounded-2xl border px-4 py-2.5"
+            style={{ background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.1)" }}
+          >
+            <div
+              className="font-display text-[26px] font-semibold leading-none tabular-nums"
+              style={{ color: "#ffb020" }}
+            >
+              {formatSecs(displayMs)}
+            </div>
+            <div className="mt-1.5 font-mono text-[9.5px] tracking-[0.14em] text-[rgba(226,234,255,0.45)]">
+              {bestForSize != null ? `BEST ${formatSecs(bestForSize)}` : "TIME"}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* progress bar */}
@@ -546,17 +500,17 @@ export function Schulte({
         open={showModal}
         onClose={() => setShowModal(false)}
         accent={ACCENT}
-        eyebrow={`${lastSize}×${lastSize} CLEARED`}
-        title={titleForTime(lastMs, lastSize)}
+        eyebrow={`${size}×${size} CLEARED`}
+        title={titleForTime(lastMs, size)}
         statValue={formatSecs(lastMs)}
         statLabel={
-          (bestBySize[lastSize] ?? null) != null &&
-          (bestBySize[lastSize] as number) < lastMs
-            ? `BEST ${formatSecs(bestBySize[lastSize] as number)}`
+          (bestBySize[size] ?? null) != null &&
+          (bestBySize[size] as number) < lastMs
+            ? `BEST ${formatSecs(bestBySize[size] as number)}`
             : "NEW BEST · CLEAR TIME"
         }
         insight={INSIGHT}
-        share={shareLine(lastMs, lastSize)}
+        share={shareLine(lastMs, size)}
       />
     </div>
   );

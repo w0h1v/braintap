@@ -8,7 +8,8 @@ import { GAME_METAS, GAME_ORDER, ROTATION } from "@/lib/games";
 import { getDailyLeaderboard, getLiveCount, type LeaderboardEntry } from "@/lib/leaderboard";
 import { useProgress } from "@/lib/progress";
 import { todayISO } from "@/lib/daily";
-import type { GameId } from "@/lib/types";
+import type { GameId, Difficulty } from "@/lib/types";
+import { DIFFICULTIES, DIFFICULTY_META } from "@/lib/difficulty";
 import { GuestCta } from "@/components/GuestCta";
 import { cn } from "@/lib/cn";
 
@@ -81,6 +82,7 @@ export default function LeaderboardPage() {
   const results = useProgress((s) => s.results);
 
   const [selected, setSelected] = useState<GameId>(() => featuredGameId());
+  const [tier, setTier] = useState<Difficulty>("medium");
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [liveTarget, setLiveTarget] = useState(0);
@@ -91,7 +93,7 @@ export default function LeaderboardPage() {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    getDailyLeaderboard(selected, today)
+    getDailyLeaderboard(selected, today, tier)
       .then((rows) => {
         if (active) {
           setEntries(rows);
@@ -109,7 +111,7 @@ export default function LeaderboardPage() {
     };
     // results in deps so the board re-splices "You" after a fresh play
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, today, results]);
+  }, [selected, today, tier, results]);
 
   // Load the live count once.
   useEffect(() => {
@@ -225,6 +227,34 @@ export default function LeaderboardPage() {
             <Pill color={meta.accent.solid} className="uppercase">
               {meta.name}
             </Pill>
+          </div>
+
+          {/* difficulty tier tabs */}
+          <div role="tablist" aria-label="Difficulty" className="mt-4 flex gap-1.5">
+            {DIFFICULTIES.map((d) => {
+              const dm = DIFFICULTY_META[d];
+              const active = d === tier;
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setTier(d)}
+                  className={cn(
+                    "flex-1 rounded-pill border px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] transition-colors",
+                    active
+                      ? "text-[#04060f]"
+                      : "border-line bg-white/[0.02] text-ink-soft hover:text-ink",
+                  )}
+                  style={
+                    active ? { backgroundColor: dm.color, borderColor: "transparent" } : undefined
+                  }
+                >
+                  {dm.label}
+                </button>
+              );
+            })}
           </div>
 
           <div className="mt-5 flex flex-col gap-1.5">

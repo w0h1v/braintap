@@ -7,10 +7,11 @@
  * result if they've played today. Nothing here ever throws.
  */
 
-import type { GameId } from "./types";
+import type { GameId, Difficulty } from "./types";
 import { getSupabaseBrowser } from "./supabase/client";
 import { rngFromString, type Rng } from "./rng";
 import { dayNumber, todayISO } from "./daily";
+import { DEFAULT_DIFFICULTY } from "./difficulty";
 import { useProgress } from "./progress";
 
 export interface LeaderboardEntry {
@@ -38,8 +39,9 @@ function synthBoard(
   dateISO: string,
   topN: number,
   you?: { score: number; timeMs?: number },
+  difficulty: Difficulty = DEFAULT_DIFFICULTY,
 ): LeaderboardEntry[] {
-  const rng = rngFromString(`lb:${gameId}:${dateISO}`);
+  const rng = rngFromString(`lb:${gameId}:${difficulty}:${dateISO}`);
   const names = rng.shuffle(FAKE_NAMES).slice(0, topN + 4);
 
   // Generate descending plausible scores in the 55–99 range.
@@ -70,10 +72,16 @@ function synthBoard(
   }));
 }
 
-/** The local player's result for a game/date, if any (browser only). */
-function localResult(gameId: GameId, dateISO: string): { score: number; timeMs?: number } | undefined {
+/** The local player's result for a game/date/tier, if any (browser only). */
+function localResult(
+  gameId: GameId,
+  dateISO: string,
+  difficulty: Difficulty,
+): { score: number; timeMs?: number } | undefined {
   try {
-    const res = useProgress.getState().results[dateISO]?.[gameId];
+    const st = useProgress.getState();
+    const res =
+      st.tierResults[dateISO]?.[gameId]?.[difficulty] ?? st.results[dateISO]?.[gameId];
     if (!res) return undefined;
     return { score: res.score, timeMs: res.timeMs };
   } catch {
@@ -88,9 +96,10 @@ function localResult(gameId: GameId, dateISO: string): { score: number; timeMs?:
 export async function getDailyLeaderboard(
   gameId: GameId,
   dateISO: string = todayISO(),
+  difficulty: Difficulty = DEFAULT_DIFFICULTY,
   topN: number = DEFAULT_TOP_N,
 ): Promise<LeaderboardEntry[]> {
-  const you = localResult(gameId, dateISO);
+  const you = localResult(gameId, dateISO, difficulty);
   const supabase = getSupabaseBrowser();
 
   if (supabase) {
@@ -98,6 +107,7 @@ export async function getDailyLeaderboard(
       const { data, error } = await supabase.rpc("get_daily_leaderboard", {
         game: gameId,
         day: dateISO,
+        diff: difficulty,
         top_n: topN,
       });
       if (!error && Array.isArray(data) && data.length > 0) {

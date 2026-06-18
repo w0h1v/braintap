@@ -18,6 +18,9 @@ export type GameId =
   | "slide"
   | "reversi";
 
+/** Daily difficulty tiers. Each game serves one puzzle per tier per day. */
+export type Difficulty = "easy" | "medium" | "hard";
+
 /** Cognitive domains tracked on the brain profile radar. */
 export type SkillDomain =
   | "verbal"
@@ -91,6 +94,13 @@ export interface GameComponentProps<P = unknown, S = unknown> {
   reducedMotion?: boolean;
   /** True when this is a past/archived puzzle (read-only-ish, no streak). */
   isArchive?: boolean;
+  /** Active difficulty tier (for games that support tiers). */
+  difficulty?: Difficulty;
+  /**
+   * When true, the GameHost is showing a unified timer in its header, so the
+   * game should suppress its own internal timer display to avoid duplication.
+   */
+  hostTimer?: boolean;
 }
 
 /**
@@ -99,8 +109,12 @@ export interface GameComponentProps<P = unknown, S = unknown> {
  */
 export interface GameModule<P = unknown, S = unknown> {
   meta: GameMeta;
-  /** Deterministically produce the puzzle for a given ISO date. */
-  getDailyPuzzle: (dateISO: string) => P;
+  /**
+   * Deterministically produce the puzzle for a given ISO date and (optional)
+   * difficulty tier. Games that don't support tiers ignore the difficulty and
+   * always return their single daily puzzle (treated as "medium").
+   */
+  getDailyPuzzle: (dateISO: string, difficulty?: Difficulty) => P;
   /** The playable React component. */
   Component: ComponentType<GameComponentProps<P, S>>;
   /**
@@ -109,6 +123,12 @@ export interface GameModule<P = unknown, S = unknown> {
    * Return true if valid; throw or return false otherwise.
    */
   validatePuzzle?: (puzzle: P) => boolean;
+  /**
+   * True when this game serves distinct Easy/Medium/Hard puzzles per day with
+   * solve-to-unlock progression. When false/absent, the host renders a single
+   * daily puzzle (legacy behaviour).
+   */
+  supportsDifficulty?: boolean;
 }
 
 /**

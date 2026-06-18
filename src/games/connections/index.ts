@@ -10,4 +10,5 @@ export default defineGame<ConnectionsPuzzle, any>({
   getDailyPuzzle,
   Component: Connections,
   validatePuzzle: validateConnections,
+  supportsDifficulty: true,
 });

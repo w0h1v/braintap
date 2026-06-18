@@ -1,8 +1,16 @@
+import type { Difficulty } from "@/lib/types";
 import { rngFromString } from "@/lib/rng";
 import { dailySeed } from "@/lib/daily";
-import { generateGrid, DEFAULT_SIZE, type SchultePuzzle } from "./engine";
+import { generateGrid, DEFAULT_SIZE, type SchulteSize, type SchultePuzzle } from "./engine";
 
 const cache = new Map<string, SchultePuzzle>();
+
+/** Difficulty → grid edge length: easy=3×3, medium=5×5, hard=7×7. */
+const SIZE_BY_DIFFICULTY: Record<Difficulty, SchulteSize> = {
+  easy: 3,
+  medium: 5,
+  hard: 7,
+};
 
 /**
  * Deterministic Schulte table for a date and grid size (memoised). The grid is
@@ -29,7 +37,15 @@ export function getDailyPuzzleForSize(
   return puzzle;
 }
 
-/** Deterministic daily Schulte table (the default 5×5) for a date. */
-export function getDailyPuzzle(dateISO: string): SchultePuzzle {
-  return getDailyPuzzleForSize(dateISO, DEFAULT_SIZE);
+/**
+ * Deterministic daily Schulte table for a date and difficulty tier. The tier
+ * selects the grid size — easy=3×3, medium=5×5, hard=7×7 — and the table is
+ * deterministic per (date, size). Omitting the difficulty yields the medium 5×5
+ * table, preserving the historical daily puzzle.
+ */
+export function getDailyPuzzle(
+  dateISO: string,
+  difficulty: Difficulty = "medium",
+): SchultePuzzle {
+  return getDailyPuzzleForSize(dateISO, SIZE_BY_DIFFICULTY[difficulty]);
 }

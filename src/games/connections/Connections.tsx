@@ -20,6 +20,14 @@ import {
   type ConnectionsPuzzle,
 } from "./engine";
 
+/**
+ * Live mistake allowance for a puzzle. Falls back to the legacy constant when a
+ * puzzle predates the per-tier `maxMistakes` field so older states never crash.
+ */
+function maxMistakesFor(puzzle: ConnectionsPuzzle): number {
+  return typeof puzzle.maxMistakes === "number" ? puzzle.maxMistakes : MAX_MISTAKES;
+}
+
 const ACCENT = GAME_METAS.connections.accent;
 
 /** Hints allowed per game. */
@@ -103,11 +111,15 @@ export function Connections({
   /** Number of columns in the tile grid (matches grid-cols-4). */
   const GRID_COLS = 4;
 
+  const maxMistakes = maxMistakesFor(puzzle);
+  /** Show near-miss "one away" feedback only when the tier allows it. */
+  const showOneAway = puzzle.oneAway !== false;
+
   const gameOver = status !== "playing";
   const won = status === "won";
   const lost = status === "lost";
   const flawless = won && mistakes === 0;
-  const mistakesLeft = MAX_MISTAKES - mistakes;
+  const mistakesLeft = maxMistakes - mistakes;
 
   // Persist resumable state.
   useEffect(() => {
@@ -246,12 +258,14 @@ export function Connections({
     haptics.error();
     sfx.wrong();
     flash(
-      ev.result === "one-away" ? "So close — one away" : "Not a group",
+      ev.result === "one-away" && showOneAway
+        ? "So close — one away"
+        : "Not a group",
       "error",
     );
     setTimeout(() => setShaking([]), reducedMotion ? 0 : 520);
 
-    if (nextMistakes >= MAX_MISTAKES) {
+    if (nextMistakes >= maxMistakes) {
       // reveal remaining groups, then end.
       const revealed = puzzle.groups
         .map((_, i) => i)
@@ -274,6 +288,8 @@ export function Connections({
     finish,
     flash,
     reducedMotion,
+    maxMistakes,
+    showOneAway,
   ]);
 
   const shuffle = useCallback(() => {
@@ -605,9 +621,9 @@ export function Connections({
             <div
               className="flex gap-[7px]"
               role="img"
-              aria-label={`${mistakes} of ${MAX_MISTAKES} mistakes used, ${mistakesLeft} remaining`}
+              aria-label={`${mistakes} of ${maxMistakes} mistakes used, ${mistakesLeft} remaining`}
             >
-              {Array.from({ length: MAX_MISTAKES }, (_, i) => {
+              {Array.from({ length: maxMistakes }, (_, i) => {
                 const used = i < mistakes;
                 return (
                   <span

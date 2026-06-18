@@ -18,9 +18,17 @@ import {
   type SchultePuzzle,
 } from "./engine";
 import { getDailyPuzzle, getDailyPuzzleForSize } from "./generator";
+import type { Difficulty } from "@/lib/types";
 
 const START = "2025-01-01";
 const SAMPLE = 200; // ~6+ months of daily puzzles
+
+/** Difficulty → expected grid edge length. */
+const SIZE_BY_DIFFICULTY: Record<Difficulty, number> = {
+  easy: 3,
+  medium: 5,
+  hard: 7,
+};
 
 function isPermutationOf(grid: number[], n: number): boolean {
   if (grid.length !== n) return false;
@@ -171,6 +179,29 @@ describe("schulte engine", () => {
       getDailyPuzzleForSize("2025-03-14", DEFAULT_SIZE).grid,
     );
   });
+
+  it("getDailyPuzzle maps difficulty → size (easy=3, medium=5, hard=7)", () => {
+    expect(getDailyPuzzle("2025-03-14", "easy").size).toBe(3);
+    expect(getDailyPuzzle("2025-03-14", "medium").size).toBe(5);
+    expect(getDailyPuzzle("2025-03-14", "hard").size).toBe(7);
+    // omitting the difficulty yields the medium 5×5 daily table unchanged
+    expect(getDailyPuzzle("2025-03-14").grid).toEqual(
+      getDailyPuzzle("2025-03-14", "medium").grid,
+    );
+  });
+
+  it("getDailyPuzzle is deterministic per (date, difficulty) and tier-scoped", () => {
+    for (const d of ["easy", "medium", "hard"] as const) {
+      const a = getDailyPuzzle("2025-03-14", d);
+      const b = getDailyPuzzle("2025-03-14", d);
+      expect(a.size).toBe(SIZE_BY_DIFFICULTY[d]);
+      expect(a.grid).toEqual(b.grid);
+      // matches the size-keyed helper for the mapped size
+      expect(a.grid).toEqual(
+        getDailyPuzzleForSize("2025-03-14", SIZE_BY_DIFFICULTY[d]).grid,
+      );
+    }
+  });
 });
 
 describe("schulte daily puzzles are always solvable", () => {
@@ -195,6 +226,23 @@ describe("schulte daily puzzles are always solvable", () => {
           `size ${s} not a permutation on ${date}`,
         ).toBe(true);
         expect(validateSchulte(p), `size ${s} validator failed on ${date}`).toBe(true);
+        date = addDays(date, 1);
+      }
+    }
+  });
+
+  it("each difficulty tier yields a valid permutation of the expected size across many days", () => {
+    for (const d of ["easy", "medium", "hard"] as const) {
+      const expectedSize = SIZE_BY_DIFFICULTY[d];
+      let date = START;
+      for (let i = 0; i < SAMPLE; i++) {
+        const p: SchultePuzzle = getDailyPuzzle(date, d);
+        expect(p.size, `tier ${d} wrong size on ${date}`).toBe(expectedSize);
+        expect(
+          isPermutationOf(p.grid, cellsFor(expectedSize)),
+          `tier ${d} not a permutation on ${date}`,
+        ).toBe(true);
+        expect(validateSchulte(p), `tier ${d} validator failed on ${date}`).toBe(true);
         date = addDays(date, 1);
       }
     }

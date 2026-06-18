@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { addDays } from "@/lib/daily";
+import type { Difficulty } from "@/lib/types";
 import {
   POOL,
   GROUP_COUNT,
   GROUP_SIZE,
   TILE_COUNT,
   GROUP_COLORS,
+  DIFFICULTY_RULES,
   buildPuzzle,
   evaluateGuess,
   getHint,
@@ -19,6 +21,7 @@ import { rngFromString } from "@/lib/rng";
 
 const START = "2025-01-01";
 const SAMPLE = 200; // > 180 days
+const TIERS: Difficulty[] = ["easy", "medium", "hard"];
 
 const key = (w: string) => w.trim().toLowerCase();
 
@@ -96,6 +99,86 @@ describe("connections daily puzzles are solvable (solvable bank)", () => {
       expect(ev.result).toBe("correct");
       expect(p.groups[ev.groupIndex].label).toBe(g.label);
     }
+  });
+});
+
+describe("connections difficulty tiers", () => {
+  it("DIFFICULTY_RULES matches the agreed mapping", () => {
+    expect(DIFFICULTY_RULES.easy).toEqual({ maxMistakes: 6, oneAway: true });
+    expect(DIFFICULTY_RULES.medium).toEqual({ maxMistakes: 4, oneAway: true });
+    expect(DIFFICULTY_RULES.hard).toEqual({ maxMistakes: 3, oneAway: false });
+  });
+
+  it.each(TIERS)(
+    "buildPuzzle(rng, %s) sets the tier's maxMistakes/oneAway and validates",
+    (tier) => {
+      const rule = DIFFICULTY_RULES[tier];
+      // Many independent seeds to exercise the retry/uniqueness path per tier.
+      for (let i = 0; i < SAMPLE; i++) {
+        const p = buildPuzzle(rngFromString(`connections:${tier}:${i}`), tier);
+        expect(p.maxMistakes, `maxMistakes seed ${i} tier ${tier}`).toBe(
+          rule.maxMistakes,
+        );
+        expect(p.oneAway, `oneAway seed ${i} tier ${tier}`).toBe(rule.oneAway);
+        expect(validateConnections(p), `validator seed ${i} tier ${tier}`).toBe(
+          true,
+        );
+      }
+    },
+  );
+
+  it.each(TIERS)(
+    "getDailyPuzzle(date, %s) across many days is valid with tier rules",
+    (tier) => {
+      const rule = DIFFICULTY_RULES[tier];
+      let date = START;
+      for (let i = 0; i < SAMPLE; i++) {
+        const p = getDailyPuzzle(date, tier);
+        expect(p.groups.length, `groups ${date} ${tier}`).toBe(GROUP_COUNT);
+        expect(p.tiles.length, `tiles ${date} ${tier}`).toBe(TILE_COUNT);
+        expect(p.maxMistakes, `maxMistakes ${date} ${tier}`).toBe(rule.maxMistakes);
+        expect(p.oneAway, `oneAway ${date} ${tier}`).toBe(rule.oneAway);
+        expect(validateConnections(p), `validator ${date} ${tier}`).toBe(true);
+        date = addDays(date, 1);
+      }
+    },
+  );
+
+  it("each tier draws a distinct daily board (different seed per tier)", () => {
+    let date = START;
+    let distinctDays = 0;
+    for (let i = 0; i < SAMPLE; i++) {
+      const easy = getDailyPuzzle(date, "easy");
+      const medium = getDailyPuzzle(date, "medium");
+      const hard = getDailyPuzzle(date, "hard");
+      const boards = new Set([
+        easy.tiles.join("|"),
+        medium.tiles.join("|"),
+        hard.tiles.join("|"),
+      ]);
+      // The three tiers should not all collapse to one identical board.
+      if (boards.size === 3) distinctDays++;
+      date = addDays(date, 1);
+    }
+    // Overwhelmingly the three tiers differ; require it on (nearly) every day.
+    expect(distinctDays).toBeGreaterThan(SAMPLE - 5);
+  });
+
+  it("getDailyPuzzle defaults to the medium tier", () => {
+    const def = getDailyPuzzle("2025-04-09");
+    const med = getDailyPuzzle("2025-04-09", "medium");
+    expect(def.tiles).toEqual(med.tiles);
+    expect(def.maxMistakes).toBe(DIFFICULTY_RULES.medium.maxMistakes);
+    expect(def.oneAway).toBe(DIFFICULTY_RULES.medium.oneAway);
+  });
+
+  it("validateConnections rejects out-of-range maxMistakes / non-bool oneAway", () => {
+    const base = buildPuzzle(rngFromString("connections:reject"), "medium");
+    expect(validateConnections({ ...base, maxMistakes: 0 })).toBe(false);
+    expect(validateConnections({ ...base, maxMistakes: 9 })).toBe(false);
+    expect(validateConnections({ ...base, maxMistakes: 2.5 })).toBe(false);
+    // @ts-expect-error deliberately wrong type for the guard test
+    expect(validateConnections({ ...base, oneAway: "yes" })).toBe(false);
   });
 });
 

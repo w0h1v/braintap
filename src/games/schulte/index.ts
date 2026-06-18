@@ -10,4 +10,5 @@ export default defineGame<SchultePuzzle, any>({
   getDailyPuzzle,
   Component: Schulte,
   validatePuzzle: validateSchulte,
+  supportsDifficulty: true,
 });
