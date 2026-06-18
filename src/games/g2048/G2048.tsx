@@ -1,0 +1,745 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { GameComponentProps } from "@/lib/types";
+import { GAME_METAS } from "@/games/_meta";
+import { CompletionModal } from "@/components/play/CompletionModal";
+import { haptics } from "@/lib/haptics";
+import { sfx } from "@/lib/sound";
+import { cn } from "@/lib/cn";
+import {
+  SIZE,
+  CELLS,
+  WIN_TILE,
+  applySpawn,
+  canMove,
+  hasWon,
+  maxTile,
+  moveWithPaths,
+  type Direction,
+  type G2048Puzzle,
+} from "./engine";
+
+const ACCENT = GAME_METAS.g2048.accent;
+const INSIGHT =
+  "Sliding-tile games blend spatial planning with arithmetic — you're running a constant cost-benefit search several moves ahead, a workout for the brain's executive-function network.";
+
+/** Animation timing (ms). Slide first, then the spawn/merge accents land. */
+const SLIDE_MS = 120;
+const POP_MS = 200;
+
+/** [background, text] per tile value; anything higher falls back to the magenta cap. */
+const COLOR_FOR: Record<number, [string, string]> = {
+  2: ["#2a3358", "#cdd8f0"],
+  4: ["#33406e", "#dfe9ff"],
+  8: ["#3a5bd9", "#eafcff"],
+  16: ["#5b8cff", "#04060f"],
+  32: ["#00a8c8", "#04060f"],
+  64: ["#00e5ff", "#04060f"],
+  128: ["#7CF5C4", "#04140d"],
+  256: ["#16b97e", "#eafcff"],
+  512: ["#ff9e3d", "#04060f"],
+  1024: ["#ff6b9d", "#04060f"],
+  2048: ["#ff2bd6", "#ffffff"],
+};
+const colorFor = (v: number): [string, string] => COLOR_FOR[v] ?? ["#ff2bd6", "#ffffff"];
+
+/** A subtle outer glow for the higher-value tiles, so milestones read as "hot". */
+function tileGlow(v: number): string {
+  if (v >= WIN_TILE) return "0 0 22px rgba(255,43,214,0.55), 0 2px 12px rgba(0,0,0,0.3)";
+  if (v >= 256) {
+    const [bg] = colorFor(v);
+    return `0 0 16px ${bg}66, 0 2px 10px rgba(0,0,0,0.28)`;
+  }
+  return "0 2px 10px rgba(0,0,0,0.25)";
+}
+
+function tileFontSize(v: number): string {
+  if (v >= 1024) return "clamp(15px, 5vw, 22px)";
+  if (v >= 128) return "clamp(18px, 6vw, 26px)";
+  return "clamp(22px, 7.2vw, 30px)";
+}
+
+interface G2048State {
+  grid: number[];
+  score: number;
+  best: number;
+  spawnIndex: number;
+  won: boolean;
+  over: boolean;
+  /** Player chose to keep playing after reaching 2048. */
+  continued: boolean;
+  /** Set once onComplete has fired, so it only fires a single time. */
+  completed: boolean;
+}
+
+/**
+ * A rendered tile with a stable identity so React (and CSS transforms) can
+ * animate it from one cell to the next across moves. `cell` is the board index
+ * (0..15). `spawn`/`pop` are transient accent flags consumed after one frame.
+ */
+interface RTile {
+  id: number;
+  value: number;
+  cell: number;
+  /** Freshly spawned this move — fade/scale in after the slide. */
+  spawn?: boolean;
+  /** Result of a merge this move — gets a scale "pop". */
+  pop?: boolean;
+}
+
+const KEY_TO_DIR: Record<string, Direction> = {
+  ArrowUp: "U",
+  ArrowDown: "D",
+  ArrowLeft: "L",
+  ArrowRight: "R",
+  w: "U",
+  W: "U",
+  s: "D",
+  S: "D",
+  a: "L",
+  A: "L",
+  d: "R",
+  D: "R",
+};
+
+/** Build the initial rendered-tile list from a flat grid (no animation flags). */
+function tilesFromGrid(grid: number[], startId: number): { tiles: RTile[]; nextId: number } {
+  const tiles: RTile[] = [];
+  let id = startId;
+  for (let i = 0; i < CELLS; i++) {
+    if (grid[i] !== 0) tiles.push({ id: id++, value: grid[i], cell: i });
+  }
+  return { tiles, nextId: id };
+}
+
+export function G2048({
+  puzzle,
+  onComplete,
+  savedState,
+  onPersistState,
+  reducedMotion = false,
+}: GameComponentProps<G2048Puzzle, G2048State>) {
+  const saved = savedState ?? null;
+
+  const [grid, setGrid] = useState<number[]>(() => saved?.grid ?? puzzle.start.slice());
+  const [score, setScore] = useState(() => saved?.score ?? 0);
+  const [best, setBest] = useState(() => saved?.best ?? 0);
+  const [spawnIndex, setSpawnIndex] = useState(() => saved?.spawnIndex ?? 0);
+  const [won, setWon] = useState(() => saved?.won ?? false);
+  const [over, setOver] = useState(() => saved?.over ?? false);
+  const [continued, setContinued] = useState(() => saved?.continued ?? false);
+  const [showModal, setShowModal] = useState(false);
+  /** Last points gained, surfaced as a floating "+N" near the score. */
+  const [gainPulse, setGainPulse] = useState<{ id: number; amount: number } | null>(null);
+  /** Direction nudge for tactile feedback when a move is rejected. */
+  const [nudge, setNudge] = useState<Direction | null>(null);
+
+  // Stable-identity tiles for animation. Seeded from the (possibly restored) grid.
+  const idRef = useRef(0);
+  const [tiles, setTiles] = useState<RTile[]>(() => {
+    const init = tilesFromGrid(saved?.grid ?? puzzle.start.slice(), 0);
+    idRef.current = init.nextId;
+    return init.tiles;
+  });
+
+  const completedRef = useRef(saved?.completed ?? false);
+  const movesRef = useRef(0);
+  const gainIdRef = useRef(0);
+  const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Pending post-slide timers (spawn-in, merge cleanup) — cleared on unmount. */
+  const animTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  /**
+   * True while a slide/merge animation is mid-flight. The board grid only
+   * updates once the slide finishes, so accepting another move before then
+   * would re-derive paths from the stale grid and desync the tile layer. We
+   * drop input during this short window (animated mode only).
+   */
+  const animatingRef = useRef(false);
+
+  // The game is locked only when it is over, or won AND the player has not opted
+  // to keep playing past 2048 (the spec allows continuing for a higher score).
+  const locked = over || (won && !continued);
+
+  // Persist resumable state (JSON-serialisable only).
+  useEffect(() => {
+    onPersistState?.({
+      grid,
+      score,
+      best,
+      spawnIndex,
+      won,
+      over,
+      continued,
+      completed: completedRef.current,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grid, score, best, spawnIndex, won, over, continued]);
+
+  // Clear any pending timers on unmount.
+  useEffect(() => {
+    return () => {
+      if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
+      for (const t of animTimers.current) clearTimeout(t);
+    };
+  }, []);
+
+  const fireComplete = useCallback(
+    (finalGrid: number[], finalScore: number, didWin: boolean) => {
+      if (completedRef.current) return;
+      completedRef.current = true;
+      const top = maxTile(finalGrid);
+      // Normalised 0–100: reaching 2048 is a 100; otherwise scale by the largest
+      // tile reached (each doubling from 2 is one step toward the win tile).
+      const log = Math.log2(Math.max(2, top)); // 1..11
+      const score100 = didWin
+        ? 100
+        : Math.max(5, Math.min(95, Math.round((log / 11) * 100)));
+      const shareText = `BrainTap · 2048\n${
+        didWin ? "Reached 2048! 🟪" : `Best tile ${top} · Score ${finalScore}`
+      }\n\nbraintap.app/games`;
+      if (!reducedMotion) setTimeout(() => setShowModal(true), 300);
+      else setShowModal(true);
+      onComplete({
+        status: didWin ? "won" : "lost",
+        score: score100,
+        moves: movesRef.current,
+        shareText,
+        detail: { score: finalScore, bestTile: top, won: didWin },
+      });
+    },
+    [onComplete, reducedMotion],
+  );
+
+  const doMove = useCallback(
+    (dir: Direction) => {
+      // `locked` already covers game-over and the won-but-not-continued state.
+      // We deliberately do NOT bail on completedRef here: after "Keep playing"
+      // the result has already fired once, but play must continue. Re-firing is
+      // prevented inside fireComplete itself.
+      if (locked) return;
+      // Ignore input while a slide is animating (the grid hasn't committed yet).
+      if (animatingRef.current) return;
+      const res = moveWithPaths(grid, dir);
+      if (!res.moved) {
+        // Invalid move: no spawn, no score — but give a small tactile nudge so the
+        // input doesn't feel dead. Honour reducedMotion.
+        sfx.tap();
+        haptics.tap();
+        if (!reducedMotion) {
+          if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
+          setNudge(dir);
+          nudgeTimer.current = setTimeout(() => setNudge(null), 160);
+        }
+        return;
+      }
+
+      movesRef.current += 1;
+
+      // Spawn the next scripted tile into an empty cell.
+      const spawn = puzzle.spawns[spawnIndex % puzzle.spawns.length];
+      const before = res.grid;
+      const after = applySpawn(before, spawn);
+      const spawnedCell = after.findIndex((v, i) => before[i] === 0 && v !== 0);
+
+      const nextScore = score + res.gained;
+      const nextBest = Math.max(best, nextScore);
+
+      setScore(nextScore);
+      setBest(nextBest);
+      setSpawnIndex((s) => s + 1);
+
+      if (res.gained > 0) {
+        sfx.place();
+        haptics.success();
+        gainIdRef.current += 1;
+        setGainPulse({ id: gainIdRef.current, amount: res.gained });
+      } else {
+        sfx.tap();
+        haptics.tap();
+      }
+
+      // ---- Tile animation -------------------------------------------------
+      // Map each currently-rendered tile (keyed by its source cell) onto its
+      // path. Surviving tiles keep their id and slide to `to`; merge partners
+      // also slide to the merge destination, then we collapse to one popped
+      // tile after the slide finishes. The spawned tile appears post-slide.
+      const byCell = new Map<number, RTile>();
+      for (const t of tiles) byCell.set(t.cell, t);
+
+      if (reducedMotion) {
+        // Instant: rebuild the tile list straight from the final grid.
+        for (const t of animTimers.current) clearTimeout(t);
+        animTimers.current = [];
+        const rebuilt = tilesFromGrid(after, idRef.current);
+        idRef.current = rebuilt.nextId;
+        setTiles(rebuilt.tiles);
+        setGrid(after);
+      } else {
+        animatingRef.current = true;
+        // Phase 1: slide everyone (including merge partners) to their targets.
+        // Both tiles of a merge briefly occupy the destination cell.
+        const sliding: RTile[] = [];
+        for (const p of res.paths) {
+          const primary = byCell.get(p.from);
+          if (primary) sliding.push({ ...primary, cell: p.to, spawn: false, pop: false });
+          if (p.merged && p.mergedFrom !== undefined) {
+            const partner = byCell.get(p.mergedFrom);
+            if (partner) sliding.push({ ...partner, cell: p.to, spawn: false, pop: false });
+          }
+        }
+        setTiles(sliding);
+
+        // Phase 2 (after the slide): collapse merges to the new value with a pop,
+        // and fade/scale in the freshly spawned tile.
+        const t1 = setTimeout(() => {
+          const collapsed: RTile[] = [];
+          // Keep one tile per destination cell, taking the post-merge value.
+          const claimed = new Set<number>();
+          for (const p of res.paths) {
+            if (claimed.has(p.to)) continue;
+            claimed.add(p.to);
+            const primary = byCell.get(p.from);
+            const id = primary ? primary.id : idRef.current++;
+            collapsed.push({ id, value: p.value, cell: p.to, pop: p.merged });
+          }
+          if (spawnedCell >= 0) {
+            collapsed.push({ id: idRef.current++, value: after[spawnedCell], cell: spawnedCell, spawn: true });
+          }
+          setTiles(collapsed);
+          setGrid(after);
+          // Grid is now committed; the next move can derive paths from it.
+          animatingRef.current = false;
+
+          // Phase 3: clear transient accent flags so future moves animate cleanly.
+          const t2 = setTimeout(() => {
+            setTiles((cur) => cur.map((t) => (t.spawn || t.pop ? { ...t, spawn: false, pop: false } : t)));
+          }, POP_MS);
+          animTimers.current.push(t2);
+        }, SLIDE_MS);
+        animTimers.current.push(t1);
+      }
+
+      const didWin = !won && hasWon(after);
+      if (didWin) {
+        setWon(true);
+        haptics.win();
+        sfx.win();
+        fireComplete(after, nextScore, true);
+        return;
+      }
+
+      if (!canMove(after)) {
+        setOver(true);
+        haptics.error();
+        sfx.wrong();
+        fireComplete(after, nextScore, false);
+      }
+    },
+    [grid, tiles, locked, puzzle.spawns, spawnIndex, score, best, won, reducedMotion, fireComplete],
+  );
+
+  // Keyboard: arrows + WASD.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const dir = KEY_TO_DIR[e.key];
+      if (!dir) return;
+      e.preventDefault();
+      doMove(dir);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [doMove]);
+
+  // Swipe input on the board.
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  }, []);
+  const onTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      const start = touchStart.current;
+      touchStart.current = null;
+      if (!start) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      const MIN = 24;
+      if (Math.abs(dx) < MIN && Math.abs(dy) < MIN) return;
+      if (Math.abs(dx) > Math.abs(dy)) doMove(dx > 0 ? "R" : "L");
+      else doMove(dy > 0 ? "D" : "U");
+    },
+    [doMove],
+  );
+
+  const keepPlaying = useCallback(() => {
+    setContinued(true);
+    setShowModal(false);
+  }, []);
+
+  const finalTop = useMemo(() => maxTile(grid), [grid]);
+
+  // Progress toward the 2048 milestone, by doublings (2 → 2048 is 10 steps).
+  const progress = useMemo(() => {
+    const log = Math.log2(Math.max(2, finalTop)); // 1..11
+    return Math.max(0, Math.min(1, (log - 1) / 10));
+  }, [finalTop]);
+
+  const statusMsg = over
+    ? "No moves left — game over"
+    : won && !continued
+      ? "🎉 You reached 2048!"
+      : won
+        ? "Keep merging for a higher score"
+        : "";
+
+  // Screen-reader status: concise board summary + state.
+  const srStatus = over
+    ? `Game over. Final score ${score}. Best tile ${finalTop}.`
+    : won
+      ? `You reached 2048. Score ${score}.`
+      : `Score ${score}. Largest tile ${finalTop}.`;
+
+  // Subtle directional shift used to acknowledge a rejected move.
+  const nudgeTransform = (() => {
+    if (!nudge || reducedMotion) return undefined;
+    const d = 5;
+    switch (nudge) {
+      case "U":
+        return `translateY(-${d}px)`;
+      case "D":
+        return `translateY(${d}px)`;
+      case "L":
+        return `translateX(-${d}px)`;
+      case "R":
+        return `translateX(${d}px)`;
+    }
+  })();
+
+  // Geometry for the absolutely-positioned tile layer. Cells are laid out on a
+  // 4×4 grid inside a square board with a fixed gap and inset padding; tiles are
+  // positioned via percentage left/top and animated with CSS transitions.
+  const GAP_PCT = 100 / (SIZE * 8 + (SIZE + 1)); // gap relative to inner board width
+  const cellPct = (100 - GAP_PCT * (SIZE + 1)) / SIZE;
+  const cellPos = (n: number) => GAP_PCT + n * (cellPct + GAP_PCT);
+
+  return (
+    <div className="flex w-full flex-col items-center">
+      <p className="sr-only" aria-live="polite">
+        {srStatus}
+      </p>
+
+      {/* Header: title + how-to-play hint */}
+      <div
+        className={cn(
+          "flex w-[min(92vw,332px)] flex-col items-center",
+          !reducedMotion && "animate-rise",
+        )}
+      >
+        <h1 className="font-display text-[20px] font-semibold text-[#f3f7ff]">2048</h1>
+        <p
+          className="mt-0.5 font-mono text-[10.5px] tracking-[0.16em]"
+          style={{ color: ACCENT.soft }}
+        >
+          MERGE UP TO 2048
+        </p>
+      </div>
+
+      {/* Score cards */}
+      <div className="relative mt-3 flex w-[min(92vw,332px)] items-stretch justify-center gap-3">
+        <ScoreCard label="SCORE" value={score} color={ACCENT.solid} reducedMotion={reducedMotion} />
+        <ScoreCard label="BEST" value={best} color="#00e5ff" reducedMotion={reducedMotion} />
+        {gainPulse && !reducedMotion && (
+          <span
+            key={gainPulse.id}
+            aria-hidden
+            className="pointer-events-none absolute -top-1 left-1/4 -translate-x-1/2 font-display text-[15px] font-bold"
+            style={{ color: ACCENT.soft, animation: "g2048Gain 0.7s ease-out both" }}
+            onAnimationEnd={() => setGainPulse(null)}
+          >
+            +{gainPulse.amount}
+          </span>
+        )}
+      </div>
+
+      {/* Progress toward 2048 */}
+      <div
+        className="mt-3 h-1 w-[min(92vw,332px)] overflow-hidden rounded-pill bg-white/[0.06]"
+        role="presentation"
+      >
+        <div
+          className={cn("h-full rounded-pill", !reducedMotion && "transition-[width] duration-300")}
+          style={{
+            width: `${progress * 100}%`,
+            backgroundImage: `linear-gradient(90deg, ${ACCENT.from}, ${ACCENT.to})`,
+          }}
+        />
+      </div>
+
+      {/* Status message */}
+      <div
+        className="mt-3 min-h-[18px] text-center font-mono text-[12.5px]"
+        style={{ color: over ? "#ff9e3d" : ACCENT.soft }}
+        aria-hidden
+      >
+        {statusMsg}
+      </div>
+
+      {/* Board */}
+      <div
+        className={cn("mt-1.5", over && !reducedMotion && "animate-shake")}
+        style={{ transform: nudgeTransform, transition: nudge ? "transform 0.08s ease-out" : "transform 0.12s ease-out" }}
+      >
+        <div
+          className="relative w-[min(92vw,332px)] rounded-[14px]"
+          style={{
+            aspectRatio: "1 / 1",
+            background: "rgba(155,140,255,0.08)",
+            border: "1px solid rgba(155,140,255,0.18)",
+            boxShadow: `0 18px 50px -22px ${ACCENT.solid}55, inset 0 0 40px -30px ${ACCENT.solid}`,
+            touchAction: "none",
+          }}
+          role="grid"
+          aria-label="2048 board"
+          onTouchStart={onTouchStart}
+          onTouchEnd={onTouchEnd}
+        >
+          {/* Static cell backgrounds (also the accessible grid cells). */}
+          {Array.from({ length: CELLS }, (_, i) => {
+            const r = Math.floor(i / SIZE);
+            const c = i % SIZE;
+            const v = grid[i];
+            return (
+              <div
+                key={i}
+                role="gridcell"
+                aria-label={
+                  v === 0
+                    ? `Row ${r + 1} column ${c + 1}, empty`
+                    : `Row ${r + 1} column ${c + 1}, ${v}`
+                }
+                className="absolute rounded-[9px]"
+                style={{
+                  left: `${cellPos(c)}%`,
+                  top: `${cellPos(r)}%`,
+                  width: `${cellPct}%`,
+                  height: `${cellPct}%`,
+                  background: "rgba(255,255,255,0.035)",
+                }}
+              />
+            );
+          })}
+
+          {/* Animated tile layer. Each tile is absolutely positioned and slides
+              via a CSS transition on left/top; spawn/merge add scale accents. */}
+          {tiles.map((t) => {
+            const r = Math.floor(t.cell / SIZE);
+            const c = t.cell % SIZE;
+            const [bg, fg] = colorFor(t.value);
+            const animName = t.spawn ? "g2048Spawn" : t.pop ? "g2048Merge" : undefined;
+            return (
+              <div
+                key={t.id}
+                aria-hidden
+                className="absolute flex select-none items-center justify-center break-all rounded-[9px] text-center font-display font-bold tabular-nums"
+                style={{
+                  left: `${cellPos(c)}%`,
+                  top: `${cellPos(r)}%`,
+                  width: `${cellPct}%`,
+                  height: `${cellPct}%`,
+                  background: bg,
+                  color: fg,
+                  fontSize: tileFontSize(t.value),
+                  boxShadow: tileGlow(t.value),
+                  zIndex: t.pop ? 3 : t.spawn ? 2 : 1,
+                  transition: reducedMotion
+                    ? undefined
+                    : `left ${SLIDE_MS}ms ease-in-out, top ${SLIDE_MS}ms ease-in-out, background-color 150ms, color 150ms`,
+                  animation: animName
+                    ? animName === "g2048Spawn"
+                      ? `g2048Spawn ${POP_MS}ms ease-out both`
+                      : `g2048Merge ${POP_MS}ms cubic-bezier(.2,.7,.2,1) both`
+                    : undefined,
+                }}
+              >
+                {t.value}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Directional controls */}
+      <div
+        className="mt-5 grid gap-2.5"
+        style={{ gridTemplateColumns: "repeat(3, 56px)", gridTemplateRows: "repeat(2, 56px)" }}
+        role="group"
+        aria-label="Directional controls"
+      >
+        <DirButton dir="U" label="Move up" symbol="↑" onMove={doMove} disabled={locked} reducedMotion={reducedMotion} className="col-start-2" />
+        <DirButton dir="L" label="Move left" symbol="←" onMove={doMove} disabled={locked} reducedMotion={reducedMotion} className="col-start-1 row-start-2" />
+        <DirButton dir="D" label="Move down" symbol="↓" onMove={doMove} disabled={locked} reducedMotion={reducedMotion} className="col-start-2 row-start-2" />
+        <DirButton dir="R" label="Move right" symbol="→" onMove={doMove} disabled={locked} reducedMotion={reducedMotion} className="col-start-3 row-start-2" />
+      </div>
+
+      <p className="mt-3.5 font-mono text-[10.5px]" style={{ color: "rgba(226,234,255,0.4)" }}>
+        Arrow keys, WASD, or swipe
+      </p>
+
+      {locked && (
+        <button
+          type="button"
+          onClick={() => setShowModal(true)}
+          className={cn(
+            "mt-3.5 min-h-[44px] rounded-pill border px-6 py-2.5 font-display text-[13.5px] text-[#eaf1ff]",
+            !reducedMotion && "transition-transform active:scale-[0.98]",
+          )}
+          style={{ borderColor: "rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.04)" }}
+        >
+          View result
+        </button>
+      )}
+
+      <CompletionModal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        accent={ACCENT}
+        won={won}
+        eyebrow={won ? "TILE 2048 REACHED" : "GAME OVER"}
+        title={won ? "You did it." : "Nice run."}
+        statValue={String(score)}
+        statLabel="SCORE"
+        insight={INSIGHT}
+        extra={
+          <div className="flex flex-col items-center gap-3">
+            <div className="font-mono text-[11px] tracking-[0.1em]" style={{ color: ACCENT.soft }}>
+              BEST TILE {finalTop}
+            </div>
+            {won && !over && !continued && (
+              <button
+                type="button"
+                onClick={keepPlaying}
+                className={cn(
+                  "min-h-[44px] rounded-pill border px-6 py-2 font-display text-[13px] text-[#eaf1ff] outline-none",
+                  !reducedMotion && "transition-transform active:scale-[0.98]",
+                )}
+                style={{ borderColor: `${ACCENT.solid}66`, background: `${ACCENT.solid}1f` }}
+              >
+                Keep playing →
+              </button>
+            )}
+          </div>
+        }
+        share={`BrainTap · 2048\n${
+          won ? "Reached 2048! 🟪" : `Best tile ${finalTop} · Score ${score}`
+        }\n\nbraintap.app/games`}
+      />
+
+      <style>{`
+        @keyframes g2048Merge {
+          0% { transform: scale(1); }
+          55% { transform: scale(1.18); }
+          100% { transform: scale(1); }
+        }
+        @keyframes g2048Spawn {
+          0% { transform: scale(0.1); opacity: 0; }
+          60% { opacity: 1; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        @keyframes g2048Gain {
+          0% { transform: translate(-50%, 0); opacity: 0; }
+          25% { opacity: 1; }
+          100% { transform: translate(-50%, -22px); opacity: 0; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function ScoreCard({
+  label,
+  value,
+  color,
+  reducedMotion,
+}: {
+  label: string;
+  value: number;
+  color: string;
+  reducedMotion: boolean;
+}) {
+  // Brief "tick" highlight whenever the value increases.
+  const [bump, setBump] = useState(false);
+  const prev = useRef(value);
+  useEffect(() => {
+    if (value > prev.current && !reducedMotion) {
+      setBump(true);
+      const t = setTimeout(() => setBump(false), 180);
+      prev.current = value;
+      return () => clearTimeout(t);
+    }
+    prev.current = value;
+  }, [value, reducedMotion]);
+
+  return (
+    <div
+      className="flex flex-1 flex-col items-center justify-center rounded-[14px] px-[18px] py-2.5"
+      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}
+    >
+      <div
+        className={cn(
+          "font-display text-[26px] font-semibold tabular-nums",
+          !reducedMotion && "transition-transform duration-150",
+          bump && "scale-110",
+        )}
+        style={{ color }}
+      >
+        {value}
+      </div>
+      <div
+        className="mt-[5px] font-mono text-[9.5px] tracking-[0.14em]"
+        style={{ color: "rgba(226,234,255,0.45)" }}
+      >
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function DirButton({
+  dir,
+  label,
+  symbol,
+  onMove,
+  disabled,
+  className,
+  reducedMotion,
+}: {
+  dir: Direction;
+  label: string;
+  symbol: string;
+  onMove: (d: Direction) => void;
+  disabled: boolean;
+  className?: string;
+  reducedMotion: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onMove(dir)}
+      className={cn(
+        "flex h-[56px] w-[56px] touch-manipulation items-center justify-center rounded-[12px] text-xl text-[#eafcff] disabled:opacity-40",
+        !reducedMotion && "transition-transform active:scale-90",
+        className,
+      )}
+      style={{
+        background: "rgba(155,140,255,0.14)",
+        border: "1px solid rgba(155,140,255,0.22)",
+      }}
+    >
+      {symbol}
+    </button>
+  );
+}
