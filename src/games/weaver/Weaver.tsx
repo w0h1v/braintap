@@ -12,9 +12,9 @@ import { Hive } from "./Hive";
 import {
   evaluateWord,
   getHint,
+  goalForWords,
   hiveLetters,
   rankFor,
-  RANKS,
   scoreOf,
   type SubmitError,
   type WeaverPuzzle,
@@ -55,10 +55,46 @@ export function Weaver({
   const saved = savedState ?? null;
   const hive = useMemo(() => hiveLetters(puzzle), [puzzle]);
 
-  const [found, setFound] = useState<string[]>(() => saved?.found ?? []);
-  const [order, setOrder] = useState<string[]>(
-    () => saved?.order ?? puzzle.outer.slice(),
+  // Backward-compatible reads of saved state: older or cross-tier saves may hold
+  // an `order` that is no longer a permutation of THIS hive's outer letters, or
+  // `found` words that aren't valid for this hive. Guard so a stale save can
+  // never crash or render the wrong hive.
+  const safeOrder = useCallback(
+    (s: WeaverState | null): string[] => {
+      const want = puzzle.outer;
+      const got = Array.isArray(s?.order) ? s!.order : null;
+      if (got && got.length === want.length && want.every((l) => got.includes(l))) {
+        return got.slice();
+      }
+      return want.slice();
+    },
+    [puzzle.outer],
   );
+  const safeFound = useCallback(
+    (s: WeaverState | null): string[] => {
+      if (!Array.isArray(s?.found)) return [];
+      const valid = new Set(puzzle.valid);
+      return s!.found.filter((w) => typeof w === "string" && valid.has(w)).sort();
+    },
+    [puzzle.valid],
+  );
+
+  // The win goal for this tier. Fall back to the engine helper if an older or
+  // archived puzzle shape arrived without one; clamp to the words on offer.
+  const goal = useMemo(
+    () =>
+      Math.min(
+        puzzle.valid.length,
+        Math.max(
+          1,
+          puzzle.goal ?? goalForWords(puzzle.valid.length, puzzle.difficulty),
+        ),
+      ),
+    [puzzle.valid.length, puzzle.goal, puzzle.difficulty],
+  );
+
+  const [found, setFound] = useState<string[]>(() => safeFound(saved));
+  const [order, setOrder] = useState<string[]>(() => safeOrder(saved));
   const [cur, setCur] = useState("");
   const [won, setWon] = useState(saved?.won ?? false);
   const [hintsUsed, setHintsUsed] = useState(() =>
@@ -74,9 +110,37 @@ export function Weaver({
   const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const spinTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shakeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const completedRef = useRef(false);
+  // Seed the once-only completion guard from the resumed state so a finished
+  // tier never re-fires onComplete when the player keeps finding words on reload.
+  const completedRef = useRef(saved?.won ?? false);
   const hintsRef = useRef(hintsUsed);
   hintsRef.current = hintsUsed;
+  // Solve-time stopwatch. Weaver shows no clock chip (the host owns the unified
+  // timer when hostTimer is set), but we still measure wall-clock time so the
+  // result can report timeMs. Started lazily on the first interaction.
+  const t0Ref = useRef<number | null>(null);
+  const startClock = useCallback(() => {
+    if (t0Ref.current == null) t0Ref.current = Date.now();
+  }, []);
+
+  // Reset all in-progress state when the host hands us a different puzzle
+  // (e.g. the player switches difficulty tiers). Keyed on the hive identity.
+  const puzzleKey = puzzle.center + puzzle.outer.join("");
+  const prevKeyRef = useRef(puzzleKey);
+  useEffect(() => {
+    if (prevKeyRef.current === puzzleKey) return;
+    prevKeyRef.current = puzzleKey;
+    completedRef.current = saved?.won ?? false;
+    t0Ref.current = null;
+    setFound(safeFound(saved));
+    setOrder(safeOrder(saved));
+    setCur("");
+    setWon(saved?.won ?? false);
+    setHintsUsed(Math.min(MAX_HINTS, Math.max(0, saved?.hintsUsed ?? 0)));
+    setShowModal(false);
+    setFlash(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzleKey]);
 
   const foundSet = useMemo(() => new Set(found), [found]);
   const score = useMemo(
@@ -85,24 +149,15 @@ export function Weaver({
   );
   const rank = rankFor(score, puzzle.totalScore);
   const total = puzzle.valid.length;
-  const pct = total > 0 ? Math.round((found.length / total) * 100) : 0;
+  // Progress is measured toward the tier's WIN goal, not the full word list, so
+  // the bar fills as the player approaches the count that unlocks the next tier.
+  const pct =
+    goal > 0 ? Math.min(100, Math.round((found.length / goal) * 100)) : 0;
+  const goalMet = found.length >= goal;
   const pangramCount = useMemo(
     () => found.filter((w) => w.length === 7 && evaluateWord(w, puzzle, new Set()).ok).length,
     [found, puzzle],
   );
-
-  // Distance to the next rank, for a small motivating hint under the rank pill.
-  const nextRank = useMemo(() => {
-    if (puzzle.totalScore <= 0) return null;
-    const cur = score / puzzle.totalScore;
-    for (const [threshold, label] of RANKS) {
-      if (cur < threshold) {
-        const need = Math.ceil(threshold * puzzle.totalScore) - score;
-        return { label, need: Math.max(1, need) };
-      }
-    }
-    return null;
-  }, [score, puzzle.totalScore]);
 
   // Persist resumable state (JSON-serialisable only).
   useEffect(() => {
@@ -129,6 +184,7 @@ export function Weaver({
     (finalFound: string[], finalScore: number, hints: number) => {
       if (completedRef.current) return;
       completedRef.current = true;
+      const timeMs = t0Ref.current != null ? Date.now() - t0Ref.current : 0;
       setWon(true);
       haptics.win();
       sfx.win();
@@ -142,9 +198,13 @@ export function Weaver({
         ),
       );
       setTimeout(() => setShowModal(true), reducedMotion ? 0 : 340);
+      // Reaching the tier's word goal counts as a win — this is what unlocks the
+      // next tier in the host. Players may keep finding words for a higher rank,
+      // but onComplete fires exactly once (guarded by completedRef).
       onComplete({
         status: "won",
         score: normalized,
+        timeMs,
         moves: finalFound.length,
         shareText:
           `BrainTap · Idea Weaver\n` +
@@ -155,15 +215,15 @@ export function Weaver({
           rank: finalRank,
           words: finalFound.length,
           points: finalScore,
+          goal,
           hintsUsed: hints,
         },
       });
     },
-    [onComplete, puzzle.totalScore, reducedMotion, total],
+    [onComplete, puzzle.totalScore, reducedMotion, total, goal],
   );
 
   const submit = useCallback(() => {
-    if (won) return;
     if (!cur) return;
     const r = evaluateWord(cur, puzzle, foundSet);
     if (!r.ok) {
@@ -191,17 +251,17 @@ export function Weaver({
     setCur("");
     setFound((prev) => {
       const next = [...prev, r.word].sort();
-      if (next.length === puzzle.valid.length) {
+      if (next.length >= goal) {
         const finalScore = next.reduce((s, w) => s + scoreOf(w, hive), 0);
         queueMicrotask(() => finish(next, finalScore, hintsRef.current));
       }
       return next;
     });
-  }, [won, cur, puzzle, foundSet, showFlash, reducedMotion, finish, hive]);
+  }, [cur, puzzle, foundSet, showFlash, reducedMotion, finish, hive, goal]);
 
   const tapLetter = useCallback(
     (letter: string) => {
-      if (won) return;
+      startClock();
       setCur((c) => (c.length >= 20 ? c : c + letter));
       sfx.tap();
       haptics.tap();
@@ -211,17 +271,15 @@ export function Weaver({
         popTimer.current = setTimeout(() => setPopLetter(null), 120);
       }
     },
-    [won, reducedMotion],
+    [reducedMotion, startClock],
   );
 
   const del = useCallback(() => {
-    if (won) return;
     setCur((c) => c.slice(0, -1));
     haptics.tap();
-  }, [won]);
+  }, []);
 
   const shuffle = useCallback(() => {
-    if (won) return;
     setOrder((prev) => {
       // Visual-only shuffle (UI affordance; does not affect the hive/puzzle).
       const out = prev.slice();
@@ -238,14 +296,14 @@ export function Weaver({
       if (spinTimer.current) clearTimeout(spinTimer.current);
       spinTimer.current = setTimeout(() => setSpinning(false), 340);
     }
-  }, [won, reducedMotion]);
+  }, [reducedMotion]);
 
   const useHint = useCallback(() => {
-    if (won) return;
     if (hintsRef.current >= MAX_HINTS) return;
     const hint = getHint(puzzle, foundSet);
     if (!hint) return;
 
+    startClock();
     setHintsUsed((h) => Math.min(MAX_HINTS, h + 1));
     haptics.success();
     sfx.correct();
@@ -259,7 +317,7 @@ export function Weaver({
     setFound((prev) => {
       if (prev.includes(hint.word)) return prev;
       const next = [...prev, hint.word].sort();
-      if (next.length === puzzle.valid.length) {
+      if (next.length >= goal) {
         const finalScore = next.reduce((s, w) => s + scoreOf(w, hive), 0);
         // include this hint in the count even though state hasn't flushed yet
         queueMicrotask(() =>
@@ -268,12 +326,11 @@ export function Weaver({
       }
       return next;
     });
-  }, [won, puzzle, foundSet, showFlash, reducedMotion, finish, hive]);
+  }, [puzzle, foundSet, showFlash, reducedMotion, finish, hive, goal, startClock]);
 
   // Keyboard support.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (won) return;
       if (e.key === "Enter") {
         submit();
         e.preventDefault();
@@ -296,7 +353,7 @@ export function Weaver({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [won, submit, del, tapLetter, shuffle, hive]);
+  }, [submit, del, tapLetter, shuffle, hive]);
 
   const cells = useMemo(() => [puzzle.center, ...order], [puzzle.center, order]);
 
@@ -334,14 +391,18 @@ export function Weaver({
               </span>
             )}
           </div>
-          {nextRank && !won && (
+          {goalMet ? (
+            <div className="mt-1 truncate font-mono text-[10px]" style={{ color: ACCENT.soft }}>
+              Goal cleared — keep finding words!
+            </div>
+          ) : (
             <div className="mt-1 truncate font-mono text-[10px] text-ink-faint">
-              {nextRank.need} pt{nextRank.need > 1 ? "s" : ""} to {nextRank.label}
+              {goal - found.length} more word{goal - found.length === 1 ? "" : "s"} to win
             </div>
           )}
         </div>
         <span className="shrink-0 font-mono text-[11px] text-ink-mute">
-          {found.length}/{total} · {score} pts
+          {goalMet ? `${found.length}/${total}` : `${found.length}/${goal}`} · {score} pts
         </span>
       </div>
 
@@ -349,11 +410,15 @@ export function Weaver({
         className="mt-2 h-1.5 w-full overflow-hidden rounded-full"
         style={{ background: "rgba(255,255,255,0.06)" }}
         role="progressbar"
-        aria-label="Words found"
+        aria-label={goalMet ? "Words found" : "Progress to goal"}
         aria-valuenow={pct}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuetext={`${found.length} of ${total} words`}
+        aria-valuetext={
+          goalMet
+            ? `Goal reached · ${found.length} of ${total} words found`
+            : `${found.length} of ${goal} words to win`
+        }
       >
         <div
           className="h-full rounded-full"
@@ -370,7 +435,7 @@ export function Weaver({
       <button
         type="button"
         onClick={del}
-        disabled={!cur || won}
+        disabled={!cur}
         aria-label={cur ? `Current word ${cur}. Tap to delete last letter.` : "Current word, empty"}
         className={cn(
           "mt-5 flex min-h-[40px] w-full items-center justify-center rounded-xl px-3",
@@ -432,7 +497,7 @@ export function Weaver({
           popLetter={popLetter}
           spinning={spinning}
           reducedMotion={reducedMotion}
-          disabled={won}
+          disabled={false}
           onTap={tapLetter}
         />
       </div>
@@ -442,7 +507,7 @@ export function Weaver({
         <button
           type="button"
           onClick={del}
-          disabled={won || !cur}
+          disabled={!cur}
           className={cn(
             "min-h-[44px] rounded-pill border border-line-strong px-5 font-display text-[14px] text-[#eaf1ff]",
             "outline-none transition-transform focus-visible:ring-2 focus-visible:ring-white/30 active:scale-95 disabled:opacity-40",
@@ -454,7 +519,6 @@ export function Weaver({
         <button
           type="button"
           onClick={shuffle}
-          disabled={won}
           aria-label="Shuffle outer letters"
           className={cn(
             "flex h-[44px] w-[44px] items-center justify-center rounded-pill border border-line-strong font-display text-lg text-[#eaf1ff]",
@@ -476,7 +540,7 @@ export function Weaver({
         <button
           type="button"
           onClick={submit}
-          disabled={won || cur.length < 4}
+          disabled={cur.length < 4}
           className={cn(
             "min-h-[44px] rounded-pill px-7 font-display text-[14px] font-semibold text-[#04060f]",
             "outline-none transition-transform focus-visible:ring-2 focus-visible:ring-white/50 active:scale-95",
@@ -495,7 +559,7 @@ export function Weaver({
           max={MAX_HINTS}
           onHint={useHint}
           accent={ACCENT}
-          disabled={won}
+          disabled={found.length >= total}
         />
       </div>
 
@@ -554,7 +618,7 @@ export function Weaver({
         open={showModal}
         onClose={() => setShowModal(false)}
         accent={ACCENT}
-        title="Hive cleared."
+        title="Goal reached."
         statValue={rank}
         statLabel={`${found.length} WORDS · ${score} POINTS`}
         insight={INSIGHT}

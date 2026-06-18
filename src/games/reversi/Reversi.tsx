@@ -26,7 +26,6 @@ import {
   isGameOver,
   outcomeFor,
   opponent,
-  DIFFICULTIES,
   DEFAULT_DIFFICULTY,
   isDifficulty,
   type Board,
@@ -55,19 +54,18 @@ interface ReversiState {
   turn: Player;
   last: number | null;
   over: boolean;
-  /** Whose disc colour the human controls (always YOU here). */
+  /** Whether today's result is locked in. */
   finished: boolean;
-  /** Chosen AI strength. OPTIONAL for backward-compat with old saves. */
+  /** Accumulated play time in ms (so resumed games keep their clock). */
+  elapsedMs?: number;
+  /**
+   * Legacy field from before the host owned difficulty — kept readable so old
+   * saves never crash, but no longer drives play (the puzzle's tier does).
+   */
   difficulty?: Difficulty;
 }
 
 const COLS = ["a", "b", "c", "d", "e", "f", "g", "h"];
-
-const DIFF_LABEL: Record<Difficulty, string> = {
-  easy: "Easy",
-  normal: "Normal",
-  hard: "Hard",
-};
 
 function discStyle(player: Player): React.CSSProperties {
   if (player === YOU) {
@@ -94,6 +92,15 @@ export function Reversi({
 }: GameComponentProps<ReversiPuzzle, ReversiState>) {
   const saved = savedState ?? null;
 
+  // AI strength is set by the host's difficulty tier via the puzzle. Fall back
+  // to the historical default for older puzzles that predate tiers.
+  const difficulty: Difficulty = isDifficulty(puzzle.aiDifficulty)
+    ? puzzle.aiDifficulty
+    : DEFAULT_DIFFICULTY;
+  // Read difficulty inside async timers without re-creating callbacks.
+  const difficultyRef = useRef<Difficulty>(difficulty);
+  difficultyRef.current = difficulty;
+
   const [board, setBoard] = useState<Board>(() =>
     saved?.board ? (saved.board.slice() as Board) : initialBoard(),
   );
@@ -103,12 +110,6 @@ export function Reversi({
   const [focused, setFocused] = useState<number | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [practice, setPractice] = useState(saved?.finished ?? false);
-  const [difficulty, setDifficulty] = useState<Difficulty>(
-    isDifficulty(saved?.difficulty) ? saved!.difficulty! : DEFAULT_DIFFICULTY,
-  );
-  // Read difficulty inside async timers without re-creating callbacks.
-  const difficultyRef = useRef<Difficulty>(difficulty);
-  difficultyRef.current = difficulty;
   // Cells flipped by the most recent move — drives the flip animation.
   const [flipping, setFlipping] = useState<Set<number>>(() => new Set());
   // Whose move just landed (colour the flips animate toward).
@@ -123,6 +124,21 @@ export function Reversi({
   // Deterministic AI rng — fresh per mount, seeded from the date.
   const aiRng = useRef(rngFromString(`reversi-ai:${dailySeed("reversi", dateISO)}`));
 
+  // Timing — the host owns the visible timer, but we still measure solve time so
+  // result.timeMs is reported. accumulatedRef holds time from prior sessions;
+  // startRef marks when the current session's clock began.
+  const accumulatedRef = useRef<number>(saved?.elapsedMs ?? 0);
+  const startRef = useRef<number>(Date.now());
+  const elapsedMs = useCallback(
+    () => accumulatedRef.current + (Date.now() - startRef.current),
+    [],
+  );
+
+  // Detect a host tier switch: the puzzle's AI strength changes. Restart the
+  // round so the AI plays at one consistent strength for the new tier.
+  const tierSig = `${puzzle.aiDifficulty ?? DEFAULT_DIFFICULTY}`;
+  const lastTierSigRef = useRef(tierSig);
+
   const counts = useMemo(() => score(board), [board]);
   const youMoves = useMemo(() => legalMoves(board, YOU), [board]);
   const youMoveSet = useMemo(() => new Set(youMoves), [youMoves]);
@@ -135,6 +151,7 @@ export function Reversi({
       last,
       over,
       finished: completedRef.current,
+      elapsedMs: elapsedMs(),
       difficulty,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -196,10 +213,13 @@ export function Reversi({
       setOver(true);
       setTimeout(() => setShowModal(true), reducedMotion ? 0 : 600);
 
+      const timeMs = elapsedMs();
+
       onComplete({
         status,
         score: normScore,
         moves: you + ai - 4,
+        timeMs,
         shareText,
         detail: {
           you,
@@ -210,7 +230,7 @@ export function Reversi({
         },
       });
     },
-    [onComplete, puzzle.aggressiveness, reducedMotion],
+    [onComplete, puzzle.aggressiveness, reducedMotion, elapsedMs],
   );
 
   // Drive turns: passes, AI moves, and end detection.
@@ -306,6 +326,8 @@ export function Reversi({
     aiRng.current = rngFromString(`reversi-ai:${dailySeed("reversi", dateISO)}`);
     const fresh = initialBoard();
     prevBoardRef.current = fresh;
+    accumulatedRef.current = 0;
+    startRef.current = Date.now();
     setBoard(fresh);
     setLast(null);
     setOver(false);
@@ -320,35 +342,34 @@ export function Reversi({
     if (puzzle.firstTurn === AI) scheduleAi(fresh);
   }, [dateISO, puzzle.firstTurn, scheduleAi]);
 
-  // Switching difficulty restarts the round so the AI plays at a single
-  // consistent strength. The daily board seed stays canonical (standard
-  // opening + same firstTurn); only AI strength changes.
-  const changeDifficulty = useCallback(
-    (d: Difficulty) => {
-      if (d === difficultyRef.current) return;
-      setDifficulty(d);
-      difficultyRef.current = d;
-      haptics.tap();
-      sfx.place();
-      if (aiTimer.current) clearTimeout(aiTimer.current);
-      if (flipTimer.current) clearTimeout(flipTimer.current);
-      aiRng.current = rngFromString(`reversi-ai:${dailySeed("reversi", dateISO)}`);
-      const fresh = initialBoard();
-      prevBoardRef.current = fresh;
-      setBoard(fresh);
-      setLast(null);
-      setOver(false);
-      setShowModal(false);
-      setFocused(null);
-      setFlipping(new Set());
-      setFlipColor(null);
-      setPassNote(null);
-      if (completedRef.current) setPractice(true);
-      setTurn(puzzle.firstTurn);
-      if (puzzle.firstTurn === AI) scheduleAi(fresh);
-    },
-    [dateISO, puzzle.firstTurn, scheduleAi],
-  );
+  // When the host switches difficulty tier the puzzle's AI strength changes.
+  // Restart the round from a fresh board so the AI plays at one consistent
+  // strength. The daily board stays canonical (same opening + firstTurn); only
+  // AI strength changes, and the clock restarts for the new tier's attempt.
+  useEffect(() => {
+    if (lastTierSigRef.current === tierSig) return;
+    lastTierSigRef.current = tierSig;
+    if (aiTimer.current) clearTimeout(aiTimer.current);
+    if (flipTimer.current) clearTimeout(flipTimer.current);
+    aiRng.current = rngFromString(`reversi-ai:${dailySeed("reversi", dateISO)}`);
+    const fresh = initialBoard();
+    prevBoardRef.current = fresh;
+    accumulatedRef.current = 0;
+    startRef.current = Date.now();
+    completedRef.current = false;
+    setBoard(fresh);
+    setLast(null);
+    setOver(false);
+    setShowModal(false);
+    setFocused(null);
+    setFlipping(new Set());
+    setFlipColor(null);
+    setPassNote(null);
+    setPractice(false);
+    setTurn(puzzle.firstTurn);
+    if (puzzle.firstTurn === AI) scheduleAi(fresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tierSig]);
 
   // Keyboard support.
   useEffect(() => {
@@ -463,54 +484,6 @@ export function Reversi({
           · turn:
         </span>
         <span style={{ color: "#eafcff" }}>{turnLabel}</span>
-      </div>
-
-      {/* AI difficulty — segmented control. Changing it restarts the round. */}
-      <div
-        className="mb-3 flex w-full items-center justify-center gap-2"
-        style={{ maxWidth: BOARD_MAX }}
-      >
-        <span
-          className="font-mono text-[10px] tracking-[0.12em] text-ink-faint"
-          id="reversi-ai-label"
-        >
-          AI
-        </span>
-        <div
-          role="radiogroup"
-          aria-labelledby="reversi-ai-label"
-          aria-label="AI difficulty"
-          className="flex items-center gap-1 rounded-pill border p-1"
-          style={{
-            borderColor: `${ACCENT.solid}33`,
-            background: "rgba(255,255,255,.03)",
-          }}
-        >
-          {DIFFICULTIES.map((d) => {
-            const selected = difficulty === d;
-            return (
-              <button
-                key={d}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                onClick={() => changeDifficulty(d)}
-                className={cn(
-                  "min-h-[28px] rounded-pill px-3 py-1 font-display text-[12px] outline-none",
-                  !reducedMotion && "transition-all active:scale-95",
-                )}
-                style={{
-                  color: selected ? "#06140f" : ACCENT.soft,
-                  background: selected ? ACCENT.solid : "transparent",
-                  boxShadow: selected ? `0 0 14px ${ACCENT.solid}66` : undefined,
-                  fontWeight: selected ? 600 : 400,
-                }}
-              >
-                {DIFF_LABEL[d]}
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       {/* Board */}

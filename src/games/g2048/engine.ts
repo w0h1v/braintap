@@ -9,10 +9,29 @@
  */
 
 import type { Rng } from "@/lib/rng";
+import type { Difficulty } from "@/lib/types";
 
 export const SIZE = 4;
 export const CELLS = SIZE * SIZE; // 16
 export const WIN_TILE = 2048;
+
+/**
+ * The target tile required to WIN, per difficulty tier. Lower tiers win sooner.
+ * easy=256, medium=512, hard=1024 — the classic 2048 remains reachable on every
+ * tier (the player may keep playing past the target for a higher score), but
+ * only reaching the *target* counts as a clear for unlock purposes.
+ */
+export const TARGET_BY_DIFFICULTY: Record<Difficulty, number> = {
+  easy: 256,
+  medium: 512,
+  hard: 1024,
+};
+
+/** The default win target when a puzzle omits one (legacy puzzles → medium). */
+export const DEFAULT_TARGET = TARGET_BY_DIFFICULTY.medium;
+
+/** Valid target tiles a puzzle may declare. */
+export const TARGETS = [256, 512, 1024] as const;
 
 export type Direction = "U" | "D" | "L" | "R";
 export type Grid = number[]; // length 16, 0 = empty
@@ -39,6 +58,12 @@ export interface G2048Puzzle {
    * to outlast any realistic game; the component cycles through it in order.
    */
   spawns: Spawn[];
+  /**
+   * The tile value that counts as a WIN for this puzzle's difficulty tier
+   * (256/512/1024). Optional for backward-compatibility with legacy puzzles,
+   * which default to {@link DEFAULT_TARGET}.
+   */
+  target?: number;
 }
 
 /** Indices of all empty (0) cells, row-major. */
@@ -243,9 +268,18 @@ export function canMove(g: Grid): boolean {
   return dirs.some((d) => move(g, d).moved);
 }
 
-/** True once any tile has reached the win value. */
-export function hasWon(g: Grid): boolean {
-  return g.some((v) => v >= WIN_TILE);
+/**
+ * True once any tile has reached the win value. `target` defaults to the classic
+ * 2048 tile so existing callers (and tests) keep their behaviour; per-tier daily
+ * play passes the puzzle's lower target (256/512/1024).
+ */
+export function hasWon(g: Grid, target: number = WIN_TILE): boolean {
+  return g.some((v) => v >= target);
+}
+
+/** Resolve a puzzle's win target, falling back to the medium default. */
+export function targetOf(p: G2048Puzzle): number {
+  return p.target ?? DEFAULT_TARGET;
 }
 
 /** The largest tile currently on the board. */
@@ -283,6 +317,11 @@ export function validateG2048(p: G2048Puzzle): boolean {
   for (const s of p.spawns) {
     if (s.value !== 2 && s.value !== 4) return false;
     if (typeof s.pick !== "number" || s.pick < 0 || s.pick >= 1) return false;
+  }
+  // A declared target must be one of the supported tier targets (legacy puzzles
+  // omit it and default to the medium target).
+  if (p.target !== undefined && !(TARGETS as readonly number[]).includes(p.target)) {
+    return false;
   }
   // The opening must be playable (a legal move exists).
   return canMove(p.start);

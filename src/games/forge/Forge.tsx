@@ -11,9 +11,8 @@ import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
 import {
-  N,
-  CELLS,
   cellIndex,
+  cellsFor,
   lineClue,
   isSolved,
   getHint,
@@ -58,10 +57,17 @@ export function Forge({
   savedState,
   onPersistState,
   reducedMotion,
+  hostTimer,
 }: GameComponentProps<ForgePuzzle, ForgeState>) {
+  const N = puzzle.size;
+  const CELLS = cellsFor(N);
   const saved = savedState ?? null;
-  const [cells, setCells] = useState<Cell[]>(
-    () => saved?.cells ?? (new Array(CELLS).fill(0) as Cell[]),
+  // Guard against older saves whose cells array length doesn't match this grid
+  // size (e.g. a save from a different tier or the legacy single-size puzzle).
+  const [cells, setCells] = useState<Cell[]>(() =>
+    saved?.cells && saved.cells.length === CELLS
+      ? saved.cells
+      : (new Array(CELLS).fill(0) as Cell[]),
   );
   const [won, setWon] = useState(saved?.won ?? false);
   const [hintsUsed, setHintsUsed] = useState(saved?.hintsUsed ?? 0);
@@ -244,15 +250,18 @@ export function Forge({
   }, []);
 
   // Keyboard navigation + actions.
-  const move = useCallback((dr: number, dc: number) => {
-    setSelected((cur) => {
-      let r = Math.floor(cur / N) + dr;
-      let c = (cur % N) + dc;
-      r = (r + N) % N;
-      c = (c + N) % N;
-      return cellIndex(r, c);
-    });
-  }, []);
+  const move = useCallback(
+    (dr: number, dc: number) => {
+      setSelected((cur) => {
+        let r = Math.floor(cur / N) + dr;
+        let c = (cur % N) + dc;
+        r = (r + N) % N;
+        c = (c + N) % N;
+        return cellIndex(r, c, N);
+      });
+    },
+    [N],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -309,7 +318,7 @@ export function Forge({
     const grid: Cell[][] = [];
     for (let r = 0; r < N; r++) {
       grid.push(
-        Array.from({ length: N }, (_, c) => cells[cellIndex(r, c)] as Cell),
+        Array.from({ length: N }, (_, c) => cells[cellIndex(r, c, N)] as Cell),
       );
     }
     const rowDone = grid.map((row, r) => lineSatisfied(row, puzzle.rowClues[r]));
@@ -325,7 +334,7 @@ export function Forge({
       for (let c = 0; c < N; c++) {
         if (puzzle.solution[r][c] === 1) {
           total++;
-          if (cells[cellIndex(r, c)] === 1) correct++;
+          if (cells[cellIndex(r, c, N)] === 1) correct++;
         }
       }
     }
@@ -334,7 +343,7 @@ export function Forge({
       colDone,
       progress: total ? Math.round((correct / total) * 100) : 0,
     };
-  }, [cells, puzzle.rowClues, puzzle.colClues, puzzle.solution]);
+  }, [cells, N, puzzle.rowClues, puzzle.colClues, puzzle.solution]);
 
   const status = won
     ? `Solved! ${puzzle.glyphName} revealed.`
@@ -345,9 +354,13 @@ export function Forge({
       {/* meta row */}
       <div className="mb-2 flex w-full max-w-[420px] items-center justify-between font-mono text-[11px] text-ink-mute">
         <span style={{ color: ACCENT.soft }}>NONOGRAM · {N}×{N}</span>
-        <span aria-live="off" className="tabular-nums">
-          {formatClock(clock.ms)}
-        </span>
+        {/* When the host renders a unified timer, hide our own timer chip but
+            keep all timing logic so result.timeMs is still reported. */}
+        {!hostTimer && (
+          <span aria-live="off" className="tabular-nums">
+            {formatClock(clock.ms)}
+          </span>
+        )}
       </div>
 
       {/* live status line */}
@@ -413,6 +426,7 @@ export function Forge({
             <Row
               key={`row-${r}`}
               r={r}
+              size={N}
               cells={cells}
               puzzle={puzzle}
               selected={selected}
@@ -545,6 +559,7 @@ export function Forge({
 
 function Row({
   r,
+  size,
   cells,
   puzzle,
   selected,
@@ -559,6 +574,7 @@ function Row({
   onTouchEnd,
 }: {
   r: number;
+  size: number;
   cells: Cell[];
   puzzle: ForgePuzzle;
   selected: number;
@@ -592,8 +608,8 @@ function Row({
         ))}
       </div>
 
-      {Array.from({ length: N }, (_, c) => {
-        const i = cellIndex(r, c);
+      {Array.from({ length: size }, (_, c) => {
+        const i = cellIndex(r, c, size);
         const v = cells[i];
         const sel = selected === i;
         const filled = v === 1;

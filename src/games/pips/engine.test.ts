@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { addDays } from "@/lib/daily";
+import { DIFFICULTIES } from "@/lib/difficulty";
+import type { Difficulty } from "@/lib/types";
 import {
   COLS,
   SLOTS,
@@ -13,8 +15,13 @@ import {
   solve,
   validatePips,
   getHint,
+  configOf,
+  colsFor,
+  slotsFor,
+  DIFFICULTY_CONFIG,
   type Placement,
   type Domino,
+  type PipsPuzzle,
 } from "./engine";
 import { getDailyPuzzle } from "./generator";
 
@@ -22,10 +29,11 @@ const START = "2025-01-01";
 const SAMPLE = 200; // >180 days as required
 
 /** Build the canonical placement from a puzzle's stored solution. */
-function solutionPlacement(p: ReturnType<typeof getDailyPuzzle>): Placement {
-  const slots: (number | null)[] = [null, null, null, null];
-  const flips = [false, false, false, false];
-  for (let id = 0; id < DOMINOES; id++) {
+function solutionPlacement(p: PipsPuzzle): Placement {
+  const n = p.solution.length;
+  const slots: (number | null)[] = new Array(n).fill(null);
+  const flips = new Array(n).fill(false);
+  for (let id = 0; id < n; id++) {
     const { slot, flip } = p.solution[id];
     slots[slot] = id;
     flips[id] = flip;
@@ -39,6 +47,14 @@ describe("pips engine", () => {
     expect(pairStart(1)).toBe(2);
     expect(pairStart(2)).toBe(0);
     expect(pairStart(3)).toBe(2);
+  });
+
+  it("pairStart honours a custom pair count", () => {
+    // 3 pairs → slots 0,1,2 start cols 0,2,4; slots 3,4,5 wrap to 0,2,4.
+    expect(pairStart(0, 3)).toBe(0);
+    expect(pairStart(1, 3)).toBe(2);
+    expect(pairStart(2, 3)).toBe(4);
+    expect(pairStart(3, 3)).toBe(0);
   });
 
   it("halves swaps faces when flipped", () => {
@@ -105,8 +121,8 @@ describe("pips engine", () => {
   it("getHint reveals an unplaced domino from the solution", () => {
     const p = getDailyPuzzle(START);
     const empty: Placement = {
-      slots: [null, null, null, null],
-      flips: [false, false, false, false],
+      slots: new Array(slotsFor(configOf(p))).fill(null),
+      flips: new Array(slotsFor(configOf(p))).fill(false),
     };
     const hint = getHint(p, empty);
     expect(hint).not.toBeNull();
@@ -136,12 +152,20 @@ describe("pips engine", () => {
     expect(hint!.flip).toBe(p.solution[id0].flip);
   });
 
-  it("is deterministic per date", () => {
+  it("is deterministic per date and difficulty", () => {
     const a = getDailyPuzzle("2025-03-14");
     const b = getDailyPuzzle("2025-03-14");
     expect(a.targets).toEqual(b.targets);
     expect(a.bank).toEqual(b.bank);
     expect(a.solution).toEqual(b.solution);
+
+    for (const d of DIFFICULTIES) {
+      const x = getDailyPuzzle("2025-03-14", d);
+      const y = getDailyPuzzle("2025-03-14", d);
+      expect(x.bank).toEqual(y.bank);
+      expect(x.targets).toEqual(y.targets);
+      expect(x.solution).toEqual(y.solution);
+    }
   });
 
   it("different dates generally differ", () => {
@@ -151,10 +175,83 @@ describe("pips engine", () => {
       JSON.stringify([a.targets, a.bank]) !== JSON.stringify([b.targets, b.bank]),
     ).toBe(true);
   });
+
+  it("each tier yields a distinct puzzle on the same day", () => {
+    const date = "2025-05-20";
+    const e = getDailyPuzzle(date, "easy");
+    const m = getDailyPuzzle(date, "medium");
+    const h = getDailyPuzzle(date, "hard");
+    const key = (p: PipsPuzzle) => JSON.stringify([p.targets, p.bank, p.config]);
+    expect(key(e)).not.toBe(key(m));
+    expect(key(m)).not.toBe(key(h));
+    expect(key(e)).not.toBe(key(h));
+  });
+});
+
+const TIER_CONFIG = DIFFICULTY_CONFIG;
+
+describe("pips difficulty tiers", () => {
+  it("tier board shapes escalate (size + domino + column count)", () => {
+    const e = TIER_CONFIG.easy;
+    const m = TIER_CONFIG.medium;
+    const h = TIER_CONFIG.hard;
+    // Domino/slot count strictly escalates easy < medium < hard.
+    expect(slotsFor(e)).toBeLessThan(slotsFor(m));
+    expect(slotsFor(m)).toBeLessThan(slotsFor(h));
+    // Column count is non-decreasing and strictly grows by hard.
+    expect(colsFor(e)).toBeLessThanOrEqual(colsFor(m));
+    expect(colsFor(m)).toBeLessThan(colsFor(h));
+    // Concrete intended shapes.
+    expect(slotsFor(e)).toBe(2);
+    expect(slotsFor(m)).toBe(4);
+    expect(slotsFor(h)).toBe(6);
+    expect(colsFor(h)).toBe(6);
+  });
+
+  for (const tier of DIFFICULTIES) {
+    it(`every ${tier} puzzle across ${SAMPLE} days is well-formed, solvable and valid`, () => {
+      const cfg = TIER_CONFIG[tier as Difficulty];
+      const cols = colsFor(cfg);
+      const n = slotsFor(cfg);
+      let date = START;
+      for (let i = 0; i < SAMPLE; i++) {
+        const p = getDailyPuzzle(date, tier);
+
+        // tier-correct shape
+        expect(p.difficulty, `difficulty tag on ${date}/${tier}`).toBe(tier);
+        expect(p.targets.length, `targets on ${date}/${tier}`).toBe(cols);
+        expect(p.bank.length, `bank on ${date}/${tier}`).toBe(n);
+        expect(p.solution.length, `solution on ${date}/${tier}`).toBe(n);
+
+        // faces in range
+        for (const d of p.bank) {
+          for (const f of d) {
+            expect(f).toBeGreaterThanOrEqual(MIN_FACE);
+            expect(f).toBeLessThanOrEqual(MAX_FACE);
+          }
+        }
+
+        // stored solution actually solves it
+        const placement = solutionPlacement(p);
+        expect(isSolved(p, placement), `stored solution wrong on ${date}/${tier}`).toBe(
+          true,
+        );
+
+        // solvable (validator's core guarantee)
+        const report = solve(p.targets, p.bank, 2, cfg);
+        expect(report.solvable, `not solvable on ${date}/${tier}`).toBe(true);
+
+        // module validator agrees
+        expect(validatePips(p), `validator failed on ${date}/${tier}`).toBe(true);
+
+        date = addDays(date, 1);
+      }
+    });
+  }
 });
 
 describe("pips daily puzzles are solvable", () => {
-  it(`every puzzle across ${SAMPLE} days is well-formed, solvable and uniquely solved`, () => {
+  it(`every default (medium) puzzle across ${SAMPLE} days is well-formed, solvable and uniquely solved`, () => {
     let date = START;
     for (let i = 0; i < SAMPLE; i++) {
       const p = getDailyPuzzle(date);
@@ -205,8 +302,8 @@ describe("pips daily puzzles are solvable", () => {
     }
   });
 
-  // sanity: slot count constant referenced
-  it("has four slots", () => {
+  // sanity: legacy slot count constant referenced
+  it("has four slots on the default board", () => {
     expect(SLOTS).toBe(4);
   });
 });

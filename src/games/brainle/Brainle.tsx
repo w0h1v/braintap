@@ -21,6 +21,12 @@ import {
   type Verdict,
 } from "./engine";
 
+/** Resolve the guess allowance for a puzzle, tolerating older saved shapes. */
+function maxRowsOf(puzzle: BrainlePuzzle): number {
+  const m = puzzle?.maxGuesses;
+  return typeof m === "number" && m >= 1 ? m : MAX_ROWS;
+}
+
 const ACCENT = GAME_METAS.brainle.accent;
 const INSIGHT =
   "Each guess prunes a vast search space — your brain runs a Bayesian update, narrowing the possibilities with every clue, the same way it predicts the world.";
@@ -82,6 +88,9 @@ export function Brainle({
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const answer = puzzle.answer;
+  // Guess allowance comes from the puzzle (tier-dependent); the host controls
+  // difficulty, so we read it here rather than hardcoding 6.
+  const maxRows = maxRowsOf(puzzle);
 
   // Verdicts for already-submitted rows.
   const verdicts = useMemo(
@@ -148,7 +157,7 @@ export function Brainle({
         haptics.error();
         sfx.wrong();
       }
-      const share = buildShareText(didWin, finalGuesses, answer);
+      const share = buildShareText(didWin, finalGuesses, answer, maxRows);
       // Let the staggered tile reveal (and win bounce) finish before the modal.
       const delay = reducedMotion ? 200 : FLIP_MS + (WORD_LEN - 1) * FLIP_STAGGER + 420;
       setTimeout(() => setShowModal(true), delay);
@@ -160,7 +169,7 @@ export function Brainle({
         detail: { answer, guesses: finalGuesses.length, won: didWin },
       });
     },
-    [answer, onComplete, reducedMotion],
+    [answer, onComplete, reducedMotion, maxRows],
   );
 
   const submit = useCallback(() => {
@@ -198,11 +207,11 @@ export function Brainle({
       const titles = ["Solved!", "Sharp.", "Locked in.", "Nice synapse."];
       flash(titles[Math.min(nextGuesses.length - 1, titles.length - 1)]);
       finish(true, nextGuesses);
-    } else if (nextGuesses.length >= MAX_ROWS) {
+    } else if (nextGuesses.length >= maxRows) {
       flash(answer);
       finish(false, nextGuesses);
     }
-  }, [over, current, guesses, answer, flash, doShake, finish, reducedMotion]);
+  }, [over, current, guesses, answer, flash, doShake, finish, reducedMotion, maxRows]);
 
   const typeLetter = useCallback(
     (letter: string) => {
@@ -244,9 +253,9 @@ export function Brainle({
     haptics.tap();
   }, [flash, puzzle.hint]);
 
-  // Per-cell render data for the 6×5 board.
+  // Per-cell render data for the board (maxRows × WORD_LEN).
   const rows = useMemo(() => {
-    return Array.from({ length: MAX_ROWS }, (_, r) => {
+    return Array.from({ length: maxRows }, (_, r) => {
       if (r < guesses.length) {
         const g = guesses[r];
         return Array.from({ length: WORD_LEN }, (_, c) => ({
@@ -268,11 +277,11 @@ export function Brainle({
         live: false,
       }));
     });
-  }, [guesses, verdicts, current, over]);
+  }, [guesses, verdicts, current, over, maxRows]);
 
-  const shareString = buildShareText(won, guesses, answer);
+  const shareString = buildShareText(won, guesses, answer, maxRows);
   const emojiGrid = guesses.map((g) => rowToEmoji(evaluateGuess(g, answer))).join("\n");
-  const guessesLeft = MAX_ROWS - guesses.length;
+  const guessesLeft = maxRows - guesses.length;
 
   return (
     <div className={cn("flex w-full flex-col items-center", !reducedMotion && "animate-rise")}>
@@ -321,9 +330,9 @@ export function Brainle({
       {/* board */}
       <div
         className="mt-2 grid w-full max-w-[min(86vw,320px)] gap-[6px]"
-        style={{ gridTemplateRows: `repeat(${MAX_ROWS}, 1fr)` }}
+        style={{ gridTemplateRows: `repeat(${maxRows}, 1fr)` }}
         role="grid"
-        aria-label={`Guess board, ${guesses.length} of ${MAX_ROWS} guesses used`}
+        aria-label={`Guess board, ${guesses.length} of ${maxRows} guesses used`}
       >
         {rows.map((cells, r) => {
           const isShakeRow = shake && r === guesses.length && !over;
@@ -437,7 +446,7 @@ export function Brainle({
         eyebrow="PUZZLE COMPLETE"
         won={won}
         title={won ? "Nice synapse." : "Out of guesses"}
-        statValue={won ? `${guesses.length}/${MAX_ROWS}` : `X/${MAX_ROWS}`}
+        statValue={won ? `${guesses.length}/${maxRows}` : `X/${maxRows}`}
         statLabel={won ? "GUESSES" : answer}
         insight={INSIGHT}
         share={shareString}

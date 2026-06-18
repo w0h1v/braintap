@@ -3,8 +3,11 @@ import { addDays } from "@/lib/daily";
 import {
   MIN_WORDS,
   MIN_WORD_LEN,
+  MIN_GOAL,
   HIVE_SIZE,
   OUTER_SIZE,
+  GOAL_FRACTION,
+  goalForWords,
   evaluateWord,
   getHint,
   hiveLetters,
@@ -18,9 +21,11 @@ import {
 import { getDailyPuzzle } from "./generator";
 import { PANGRAMS } from "./pangrams";
 import { WORD_SET } from "./dictionary";
+import type { Difficulty } from "@/lib/types";
 
 const START = "2025-01-01";
 const SAMPLE = 200; // ~6+ months of daily puzzles
+const TIERS: readonly Difficulty[] = ["easy", "medium", "hard"];
 
 describe("weaver scoring", () => {
   const hive = new Set(["R", "B", "A", "I", "N", "E", "D"]);
@@ -229,5 +234,139 @@ describe("weaver puzzle bank is solvable", () => {
     }
     // 60 consecutive days should yield many distinct hives
     expect(seen.size).toBeGreaterThan(50);
+  });
+});
+
+describe("weaver goalForWords (tier knob)", () => {
+  it("scales the goal by the tier fraction, rounded up", () => {
+    // 20 findable words → easy 25% = 5, medium 50% = 10, hard 75% = 15
+    expect(goalForWords(20, "easy")).toBe(5);
+    expect(goalForWords(20, "medium")).toBe(10);
+    expect(goalForWords(20, "hard")).toBe(15);
+  });
+
+  it("escalates monotonically easy < medium < hard for a rich hive", () => {
+    const e = goalForWords(40, "easy");
+    const m = goalForWords(40, "medium");
+    const h = goalForWords(40, "hard");
+    expect(e).toBeLessThan(m);
+    expect(m).toBeLessThan(h);
+  });
+
+  it("clamps to [MIN_GOAL, total] and defaults to medium", () => {
+    expect(goalForWords(0, "hard")).toBe(0);
+    // a lean hive never asks for fewer than MIN_GOAL...
+    expect(goalForWords(4, "easy")).toBe(MIN_GOAL);
+    // ...nor more than the words on offer
+    expect(goalForWords(2, "hard")).toBe(2);
+    // omitting the tier behaves like medium
+    expect(goalForWords(20)).toBe(goalForWords(20, "medium"));
+  });
+
+  it("fractions are ordered easy < medium < hard", () => {
+    expect(GOAL_FRACTION.easy).toBeLessThan(GOAL_FRACTION.medium);
+    expect(GOAL_FRACTION.medium).toBeLessThan(GOAL_FRACTION.hard);
+  });
+});
+
+describe("weaver per-tier daily puzzles", () => {
+  it("each tier serves a DIFFERENT pangram/hive on the same day", () => {
+    let date = START;
+    let allThreeDistinctDays = 0;
+    for (let i = 0; i < SAMPLE; i++) {
+      const keys = TIERS.map((t) => {
+        const p = getDailyPuzzle(date, t);
+        return p.center + p.outer.join("");
+      });
+      if (new Set(keys).size === 3) allThreeDistinctDays++;
+      date = addDays(date, 1);
+    }
+    // The tier-scoped bank index keeps the three tiers out of sync, so the vast
+    // majority of days serve three distinct hives.
+    expect(allThreeDistinctDays).toBeGreaterThan(SAMPLE * 0.9);
+  });
+
+  it("is deterministic and memoised per (date, difficulty)", () => {
+    for (const t of TIERS) {
+      const a = getDailyPuzzle("2025-04-09", t);
+      const b = getDailyPuzzle("2025-04-09", t);
+      expect(a).toEqual(b);
+      expect(a.difficulty).toBe(t);
+    }
+  });
+
+  it("omitting the difficulty yields the medium tier", () => {
+    expect(getDailyPuzzle("2025-04-09")).toEqual(getDailyPuzzle("2025-04-09", "medium"));
+  });
+
+  it(`every tier across ${SAMPLE} days is valid, solvable, and goal-consistent`, () => {
+    for (const t of TIERS) {
+      let date = START;
+      for (let i = 0; i < SAMPLE; i++) {
+        const p = getDailyPuzzle(date, t);
+
+        expect(validateWeaver(p), `tier ${t} validator failed on ${date}`).toBe(true);
+        expect(p.difficulty, `tier ${t} mislabelled on ${date}`).toBe(t);
+        expect(p.valid.length, `too few words for ${t} on ${date}`).toBeGreaterThanOrEqual(
+          MIN_WORDS,
+        );
+
+        // the goal matches the engine knob and is reachable
+        expect(p.goal, `goal missing for ${t} on ${date}`).toBe(
+          goalForWords(p.valid.length, t),
+        );
+        expect(p.goal!).toBeGreaterThanOrEqual(MIN_GOAL);
+        expect(p.goal!).toBeLessThanOrEqual(p.valid.length);
+
+        // the hive is actually solvable up to the goal: pick any `goal` valid
+        // words and they all evaluate as accepted in sequence.
+        const found = new Set<string>();
+        let i2 = 0;
+        for (const w of p.valid) {
+          if (found.size >= p.goal!) break;
+          const r = evaluateWord(w, p, found);
+          expect(r.ok, `word ${w} rejected for ${t} on ${date}`).toBe(true);
+          found.add(w);
+          i2++;
+        }
+        expect(found.size).toBe(p.goal!);
+        expect(i2).toBe(p.goal!);
+
+        date = addDays(date, 1);
+      }
+    }
+  });
+
+  it("goals escalate easy <= medium <= hard on a per-tier average", () => {
+    // Tiers draw different hives, so a single day can invert; compare the mean
+    // goal across many days to confirm the intended escalation holds overall.
+    const sums: Record<Difficulty, number> = { easy: 0, medium: 0, hard: 0 };
+    let date = START;
+    for (let i = 0; i < SAMPLE; i++) {
+      for (const t of TIERS) sums[t] += getDailyPuzzle(date, t).goal!;
+      date = addDays(date, 1);
+    }
+    expect(sums.easy).toBeLessThan(sums.medium);
+    expect(sums.medium).toBeLessThan(sums.hard);
+  });
+
+  it("validateWeaver still accepts a legacy puzzle without difficulty/goal", () => {
+    const p = getDailyPuzzle(START, "medium");
+    const legacy: WeaverPuzzle = {
+      center: p.center,
+      outer: p.outer,
+      valid: p.valid,
+      totalScore: p.totalScore,
+      pangram: p.pangram,
+    };
+    expect(legacy.difficulty).toBeUndefined();
+    expect(legacy.goal).toBeUndefined();
+    expect(validateWeaver(legacy)).toBe(true);
+  });
+
+  it("validateWeaver rejects an out-of-range goal", () => {
+    const p = getDailyPuzzle(START, "medium");
+    expect(validateWeaver({ ...p, goal: p.valid.length + 1 })).toBe(false);
+    expect(validateWeaver({ ...p, goal: -1 })).toBe(false);
   });
 });

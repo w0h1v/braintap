@@ -9,28 +9,49 @@
  *
  * The solution grid is binary (0 | 1). Clues are contiguous runs of filled
  * cells per row / column; an empty line is represented by `[0]`.
+ *
+ * The grid edge length is variable: the default daily picross is 5×5, but
+ * difficulty tiers serve 4×4 (easy), 5×5 (medium) and 7×7 (hard) grids. Every
+ * size-aware helper takes an optional `size` argument that DEFAULTS to the
+ * legacy 5, so existing callers keep their behaviour unchanged. Each puzzle also
+ * carries its own `size` so the component and validator never need to guess.
  */
 
 import type { Rng } from "@/lib/rng";
 
-/** Grid side length. */
+/** Default grid side length (the historical 5×5 daily picross). */
 export const N = 5;
 export const CELLS = N * N;
 
+/** Supported grid edge lengths across the difficulty tiers. */
+export const SIZES = [4, 5, 7] as const;
+export type ForgeSize = (typeof SIZES)[number];
+export const DEFAULT_SIZE: ForgeSize = N;
+
+/** True when `n` is one of the supported grid sizes. */
+export function isForgeSize(n: unknown): n is ForgeSize {
+  return typeof n === "number" && (SIZES as readonly number[]).includes(n);
+}
+
+/** Number of cells for a given edge length. */
+export const cellsFor = (size: number): number => size * size;
+
 export type Cell = 0 | 1 | 2;
-/** Flattened player grid, length N*N. */
+/** Flattened player grid, length size*size. */
 export type State = Cell[];
 /** A solution row/grid of 0|1. */
 export type SolutionGrid = number[][];
 export type Clue = number[];
 
 export interface ForgePuzzle {
-  /** N×N binary solution grid. */
+  /** size×size binary solution grid. */
   solution: SolutionGrid;
   /** One clue array per row (top → bottom). */
   rowClues: Clue[];
   /** One clue array per column (left → right). */
   colClues: Clue[];
+  /** Grid edge length (4, 5 or 7). */
+  size: number;
   /** Name of the hidden glyph revealed on solve. */
   glyphName: string;
   /** Single character/emoji shown in the completion modal. */
@@ -39,7 +60,9 @@ export interface ForgePuzzle {
   filled: number;
 }
 
-export const cellIndex = (r: number, c: number): number => r * N + c;
+/** Flattened index for (r, c) within a grid of edge length `size` (default 5). */
+export const cellIndex = (r: number, c: number, size: number = N): number =>
+  r * size + c;
 
 /** Contiguous runs of 1s in a line; `[0]` when the line is empty. */
 export function lineClue(line: number[]): Clue {
@@ -72,8 +95,9 @@ export function deriveRowClues(grid: SolutionGrid): Clue[] {
 
 /** Derive column clues for a solution grid. */
 export function deriveColClues(grid: SolutionGrid): Clue[] {
+  const size = grid.length;
   const out: Clue[] = [];
-  for (let c = 0; c < N; c++) out.push(lineClue(colOf(grid, c)));
+  for (let c = 0; c < size; c++) out.push(lineClue(colOf(grid, c)));
   return out;
 }
 
@@ -123,14 +147,16 @@ export function linePlacements(clue: Clue, len: number): number[][] {
 
 /**
  * Count solutions (up to `limit`) of a nonogram given its row/col clues,
- * via row-by-row backtracking with column-prefix pruning.
+ * via row-by-row backtracking with column-prefix pruning. `size` defaults to
+ * the legacy 5×5 grid; pass the puzzle's size for other tiers.
  */
 export function countSolutions(
   rowClues: Clue[],
   colClues: Clue[],
   limit = 2,
+  size: number = N,
 ): number {
-  const rowOptions = rowClues.map((clue) => linePlacements(clue, N));
+  const rowOptions = rowClues.map((clue) => linePlacements(clue, size));
   if (rowOptions.some((opts) => opts.length === 0)) return 0;
 
   const grid: number[][] = [];
@@ -142,18 +168,18 @@ export function countSolutions(
   );
 
   const colPrefixOk = (placedRows: number): boolean => {
-    for (let c = 0; c < N; c++) {
+    for (let c = 0; c < size; c++) {
       let sum = 0;
       for (let r = 0; r < placedRows; r++) sum += grid[r][c];
       if (sum > colTotals[c]) return false;
-      // remaining rows can supply at most (N - placedRows) more
-      if (sum + (N - placedRows) < colTotals[c]) return false;
+      // remaining rows can supply at most (size - placedRows) more
+      if (sum + (size - placedRows) < colTotals[c]) return false;
     }
     return true;
   };
 
   const colFinalOk = (): boolean => {
-    for (let c = 0; c < N; c++) {
+    for (let c = 0; c < size; c++) {
       const actual = lineClue(grid.map((row) => row[c]));
       if (!cluesEqual(actual, colClues[c])) return false;
     }
@@ -162,7 +188,7 @@ export function countSolutions(
 
   const backtrack = (r: number): void => {
     if (count >= limit) return;
-    if (r === N) {
+    if (r === size) {
       if (colFinalOk()) count++;
       return;
     }
@@ -178,12 +204,18 @@ export function countSolutions(
   return count;
 }
 
+/** Grid edge length of a player state given the puzzle's grid size. */
+function stateSize(solution: SolutionGrid): number {
+  return solution.length;
+}
+
 /** True when the player state exactly matches the solution. */
 export function isSolved(state: State, solution: SolutionGrid): boolean {
-  for (let r = 0; r < N; r++) {
-    for (let c = 0; c < N; c++) {
+  const size = stateSize(solution);
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
       const want = solution[r][c];
-      const got = state[cellIndex(r, c)] === 1 ? 1 : 0;
+      const got = state[cellIndex(r, c, size)] === 1 ? 1 : 0;
       if (want !== got) return false;
     }
   }
@@ -197,7 +229,7 @@ export function countFilled(grid: SolutionGrid): number {
 
 /** A single hint: the cell to reveal and the correct state it should hold. */
 export interface ForgeHint {
-  /** Flattened cell index (0..CELLS-1). */
+  /** Flattened cell index (0..size²-1). */
   index: number;
   /** Grid row. */
   r: number;
@@ -221,9 +253,10 @@ export function getHint(
   solution: SolutionGrid,
   state: State,
 ): ForgeHint | null {
-  for (let r = 0; r < N; r++) {
-    for (let c = 0; c < N; c++) {
-      const i = cellIndex(r, c);
+  const size = stateSize(solution);
+  for (let r = 0; r < size; r++) {
+    for (let c = 0; c < size; c++) {
+      const i = cellIndex(r, c, size);
       const cur = state[i];
       if (solution[r][c] === 1) {
         if (cur !== 1) return { index: i, r, c, value: 1 };
@@ -239,35 +272,41 @@ export function getHint(
 /**
  * Validate a puzzle: clues are consistent with the solution AND the clues yield
  * exactly one solution (unique). Also rejects trivial all-empty / all-full.
+ * Works for any supported grid size; falls back to the puzzle's own `size`
+ * (defaulting to 5 for older puzzles that lack the field).
  */
 export function validateForge(p: ForgePuzzle): boolean {
-  if (!p.solution || p.solution.length !== N) return false;
+  const size = isForgeSize(p.size) ? p.size : N;
+  if (!p.solution || p.solution.length !== size) return false;
   for (const row of p.solution) {
-    if (row.length !== N) return false;
+    if (row.length !== size) return false;
     for (const v of row) if (v !== 0 && v !== 1) return false;
   }
-  if (p.rowClues.length !== N || p.colClues.length !== N) return false;
+  if (p.rowClues.length !== size || p.colClues.length !== size) return false;
 
   // clues match solution
   const dr = deriveRowClues(p.solution);
   const dc = deriveColClues(p.solution);
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < size; i++) {
     if (!cluesEqual(dr[i], p.rowClues[i])) return false;
     if (!cluesEqual(dc[i], p.colClues[i])) return false;
   }
 
   // not trivial
   const filled = countFilled(p.solution);
-  if (filled === 0 || filled === CELLS) return false;
+  if (filled === 0 || filled === cellsFor(size)) return false;
 
   // unique
-  return countSolutions(p.rowClues, p.colClues, 2) === 1;
+  return countSolutions(p.rowClues, p.colClues, 2, size) === 1;
 }
 
 /**
  * Curated set of pleasing 5×5 glyph solutions. Each is binary; many double as
  * recognisable shapes. The generator seeds from these and verifies uniqueness,
  * falling back to procedural generation when a curated glyph is ambiguous.
+ *
+ * These are 5×5 glyphs used by the medium tier (and legacy single daily). The
+ * easy (4×4) and hard (7×7) tiers are generated procedurally.
  */
 export const GLYPHS: { name: string; symbol: string; grid: SolutionGrid }[] = [
   {

@@ -10,4 +10,5 @@ export default defineGame<PipsPuzzle, any>({
   getDailyPuzzle,
   Component: Pips,
   validatePuzzle: validatePips,
+  supportsDifficulty: true,
 });

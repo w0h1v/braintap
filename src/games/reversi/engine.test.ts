@@ -26,8 +26,10 @@ import {
   DEFAULT_DIFFICULTY,
   isDifficulty,
   profileFor,
+  tierToDifficulty,
   type Board,
   type Difficulty,
+  type Tier,
 } from "./engine";
 import { getDailyPuzzle } from "./generator";
 
@@ -298,6 +300,116 @@ describe("reversi daily puzzles are solvable", () => {
 
       date = addDays(date, 1);
     }
+  });
+});
+
+describe("reversi difficulty tiers (host Easy/Medium/Hard)", () => {
+  const TIERS: Tier[] = ["easy", "medium", "hard"];
+
+  it("maps each host tier to an escalating AI strength", () => {
+    expect(tierToDifficulty("easy")).toBe("easy");
+    expect(tierToDifficulty("medium")).toBe("normal");
+    expect(tierToDifficulty("hard")).toBe("hard");
+    // Search depth is the dominant strength knob and must escalate.
+    expect(profileFor(tierToDifficulty("easy")).depth).toBeLessThanOrEqual(
+      profileFor(tierToDifficulty("medium")).depth,
+    );
+    expect(profileFor(tierToDifficulty("medium")).depth).toBeLessThan(
+      profileFor(tierToDifficulty("hard")).depth,
+    );
+    // Easy plays loosest (most jitter); hard plays cleanest (no jitter).
+    expect(profileFor(tierToDifficulty("easy")).jitter).toBeGreaterThan(
+      profileFor(tierToDifficulty("medium")).jitter,
+    );
+    expect(profileFor(tierToDifficulty("hard")).jitter).toBe(0);
+  });
+
+  it("medium (the default tier) preserves the legacy daily puzzle config", () => {
+    // Omitting difficulty == medium, and the canonical board fields must match
+    // a medium request exactly (only aiDifficulty differs, by definition).
+    const legacy = getDailyPuzzle("2025-05-09");
+    const medium = getDailyPuzzle("2025-05-09", "medium");
+    expect(legacy).toEqual(medium);
+    expect(medium.aiDifficulty).toBe("normal");
+  });
+
+  it("keeps the daily board canonical across tiers (only AI strength changes)", () => {
+    let date = START;
+    for (let i = 0; i < 60; i++) {
+      const e = getDailyPuzzle(date, "easy");
+      const m = getDailyPuzzle(date, "medium");
+      const h = getDailyPuzzle(date, "hard");
+      // Same opening config (firstTurn + aggressiveness) for every tier.
+      expect(e.firstTurn).toBe(m.firstTurn);
+      expect(m.firstTurn).toBe(h.firstTurn);
+      expect(e.aggressiveness).toBe(m.aggressiveness);
+      expect(m.aggressiveness).toBe(h.aggressiveness);
+      // Distinct, correctly-mapped AI strength per tier.
+      expect(e.aiDifficulty).toBe("easy");
+      expect(m.aiDifficulty).toBe("normal");
+      expect(h.aiDifficulty).toBe("hard");
+      date = addDays(date, 1);
+    }
+  });
+
+  it("memoises per date AND difficulty (different tiers are independent objects)", () => {
+    const a1 = getDailyPuzzle("2025-07-01", "easy");
+    const a2 = getDailyPuzzle("2025-07-01", "easy");
+    const b = getDailyPuzzle("2025-07-01", "hard");
+    expect(a1).toBe(a2); // same cached instance
+    expect(a1).not.toBe(b); // different tier -> different cache entry
+    expect(a1.aiDifficulty).not.toBe(b.aiDifficulty);
+  });
+
+  it(`every tier across ${SAMPLE} days is valid and terminates`, () => {
+    for (const tier of TIERS) {
+      let date = START;
+      for (let i = 0; i < SAMPLE; i++) {
+        const p = getDailyPuzzle(date, tier);
+        expect(p.playerColor).toBe(YOU);
+        expect([YOU, AI]).toContain(p.firstTurn);
+        expect(p.aiDifficulty).toBe(tierToDifficulty(tier));
+        expect(
+          validateReversi(p),
+          `validator failed on ${date} @ ${tier}`,
+        ).toBe(true);
+
+        const rng = rngFromString(`reversi-ai:check:${tier}:${date}`);
+        const { board } = simulateGame(p, rng);
+        expect(isGameOver(board), `did not terminate on ${date} @ ${tier}`).toBe(true);
+        const s = score(board);
+        expect(s.you + s.ai + s.empty).toBe(CELLS);
+        date = addDays(date, 1);
+      }
+    }
+  });
+
+  it("hard tier AI outplays easy tier AI head-to-head across many games", () => {
+    // Stronger tier (hard, look-ahead) vs weaker tier (easy, greedy+noise).
+    let hardWins = 0;
+    let easyWins = 0;
+    for (let g = 0; g < 16; g++) {
+      const rng = rngFromString(`tier-match-${g}`);
+      let b = initialBoard();
+      // AI side = hard, YOU side = easy. Alternate who opens.
+      let turn: 1 | 2 = g % 2 === 0 ? AI : YOU;
+      for (let i = 0; i < 200 && !isGameOver(b); i++) {
+        const moves = legalMoves(b, turn);
+        if (moves.length === 0) {
+          turn = opponent(turn);
+          continue;
+        }
+        const diff: Difficulty =
+          turn === AI ? tierToDifficulty("hard") : tierToDifficulty("easy");
+        const m = chooseAiMove(b, turn, 0.5, rng, diff);
+        b = applyMove(b, rowOf(m), colOf(m), turn);
+        turn = opponent(turn);
+      }
+      const o = outcomeFor(b); // YOU(easy) perspective
+      if (o === "lost") hardWins++;
+      else if (o === "won") easyWins++;
+    }
+    expect(hardWins).toBeGreaterThanOrEqual(easyWins);
   });
 });
 

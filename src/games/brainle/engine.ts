@@ -8,10 +8,25 @@
  * many times as it remains in the answer after exact matches are removed).
  */
 
+import type { Difficulty } from "@/lib/types";
 import { VALID, ANSWERS, HINTS, GENERIC_HINT } from "./words";
 
 export const WORD_LEN = 5;
+/** Default guess allowance (medium tier / legacy single puzzle). */
 export const MAX_ROWS = 6;
+
+/**
+ * Guess allowance per difficulty tier. More guesses = easier. The tier knob for
+ * Brainle is the number of attempts allowed (plus a different word per tier).
+ */
+export const MAX_ROWS_BY_DIFFICULTY: Record<Difficulty, number> = {
+  easy: 7,
+  medium: 6,
+  hard: 5,
+};
+
+/** Largest possible guess allowance across tiers (board sizing upper bound). */
+export const MAX_ROWS_CAP = 7;
 
 /** Feedback verdict for a single tile. */
 export type Verdict = "correct" | "present" | "absent";
@@ -23,6 +38,8 @@ export interface BrainlePuzzle {
   hint: string;
   /** Index into the answer bank (for analytics / debugging). */
   index: number;
+  /** Number of guesses allowed for this puzzle (tier-dependent). */
+  maxGuesses: number;
 }
 
 /** Is a string a well-formed candidate (5 uppercase A–Z letters)? */
@@ -106,13 +123,17 @@ export function rowToEmoji(verdicts: Verdict[]): string {
     .join("");
 }
 
-/** Build the shareable result string in the BrainTap house style. */
+/**
+ * Build the shareable result string in the BrainTap house style. `maxRows`
+ * defaults to the legacy 6-guess allowance so existing callers are unaffected.
+ */
 export function buildShareText(
   won: boolean,
   guesses: string[],
   answer: string,
+  maxRows: number = MAX_ROWS,
 ): string {
-  const count = won ? `${guesses.length}/${MAX_ROWS}` : `X/${MAX_ROWS}`;
+  const count = won ? `${guesses.length}/${maxRows}` : `X/${maxRows}`;
   const grid = guesses
     .map((g) => rowToEmoji(evaluateGuess(g, answer)))
     .join("\n");
@@ -138,6 +159,7 @@ export function validateBrainle(p: BrainlePuzzle): boolean {
   if (!isWellFormed(p.answer)) return false;
   if (!VALID.has(p.answer)) return false;
   if (typeof p.hint !== "string" || p.hint.length === 0) return false;
+  if (typeof p.maxGuesses !== "number" || p.maxGuesses < 1) return false;
   return true;
 }
 

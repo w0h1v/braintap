@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { addDays } from "@/lib/daily";
+import type { Difficulty } from "@/lib/types";
 import {
   N,
   CELLS,
   GLYPHS,
+  SIZES,
+  cellsFor,
+  isForgeSize,
   lineClue,
   linePlacements,
   deriveRowClues,
@@ -16,7 +20,7 @@ import {
   getHint,
   type State,
 } from "./engine";
-import { getDailyPuzzle } from "./generator";
+import { getDailyPuzzle, TIER_PARAMS } from "./generator";
 
 const START = "2025-01-01";
 const SAMPLE = 200; // ~6+ months of daily puzzles
@@ -193,5 +197,135 @@ describe("forge daily puzzles are solvable (solvable bank)", () => {
     }
     // expect a healthy variety across a month
     expect(distinct).toBeGreaterThan(5);
+  });
+});
+
+describe("forge difficulty tiers", () => {
+  const TIERS: Difficulty[] = ["easy", "medium", "hard"];
+  const TIER_SAMPLE = 120; // ~4 months per tier
+
+  it("supported sizes escalate 4 → 5 → 7", () => {
+    expect(SIZES).toEqual([4, 5, 7]);
+    expect(TIER_PARAMS.easy.size).toBe(4);
+    expect(TIER_PARAMS.medium.size).toBe(5);
+    expect(TIER_PARAMS.hard.size).toBe(7);
+    // grid size strictly escalates with difficulty
+    expect(TIER_PARAMS.easy.size).toBeLessThan(TIER_PARAMS.medium.size);
+    expect(TIER_PARAMS.medium.size).toBeLessThan(TIER_PARAMS.hard.size);
+  });
+
+  it("omitting difficulty yields the medium 5×5 puzzle (legacy default)", () => {
+    const def = getDailyPuzzle("2025-04-09");
+    const med = getDailyPuzzle("2025-04-09", "medium");
+    expect(def.size).toBe(N);
+    expect(def.solution).toEqual(med.solution);
+  });
+
+  it("each tier is a valid, uniquely-solvable picross at its grid size", () => {
+    for (const tier of TIERS) {
+      const size = TIER_PARAMS[tier].size;
+      let date = START;
+      for (let i = 0; i < TIER_SAMPLE; i++) {
+        const p = getDailyPuzzle(date, tier);
+
+        // size is one of the supported sizes and matches the tier
+        expect(isForgeSize(p.size), `bad size on ${tier} ${date}`).toBe(true);
+        expect(p.size, `wrong size on ${tier} ${date}`).toBe(size);
+
+        // structurally valid square binary grid
+        expect(p.solution.length, `bad grid on ${tier} ${date}`).toBe(size);
+        p.solution.forEach((row) => expect(row.length).toBe(size));
+        p.solution.forEach((row) =>
+          row.forEach((v) => expect(v === 0 || v === 1).toBe(true)),
+        );
+
+        // clues match the solution
+        expect(deriveRowClues(p.solution)).toEqual(p.rowClues);
+        expect(deriveColClues(p.solution)).toEqual(p.colClues);
+
+        // exactly one solution from the clues alone (uniquely solvable)
+        expect(
+          countSolutions(p.rowClues, p.colClues, 2, size),
+          `not unique on ${tier} ${date}`,
+        ).toBe(1);
+
+        // module validator agrees
+        expect(validateForge(p), `validator failed on ${tier} ${date}`).toBe(
+          true,
+        );
+
+        // fill density stays within the tier window and is non-trivial
+        const fill = TIER_PARAMS[tier].fill;
+        expect(p.filled).toBeGreaterThanOrEqual(fill[0]);
+        expect(p.filled).toBeLessThanOrEqual(fill[1]);
+        expect(p.filled).toBeGreaterThan(0);
+        expect(p.filled).toBeLessThan(cellsFor(size));
+
+        date = addDays(date, 1);
+      }
+    }
+  });
+
+  it("average fill escalates with difficulty across many days", () => {
+    const avgFill = (tier: Difficulty) => {
+      let date = START;
+      let sum = 0;
+      for (let i = 0; i < TIER_SAMPLE; i++) {
+        sum += getDailyPuzzle(date, tier).filled;
+        date = addDays(date, 1);
+      }
+      return sum / TIER_SAMPLE;
+    };
+    const easy = avgFill("easy");
+    const medium = avgFill("medium");
+    const hard = avgFill("hard");
+    // Denser (and larger) boards as the tier rises.
+    expect(easy).toBeLessThan(medium);
+    expect(medium).toBeLessThan(hard);
+  });
+
+  it("is deterministic per (date, difficulty) and distinct across tiers", () => {
+    for (const tier of TIERS) {
+      const a = getDailyPuzzle("2025-05-20", tier);
+      const b = getDailyPuzzle("2025-05-20", tier);
+      expect(a.solution).toEqual(b.solution);
+      expect(a.rowClues).toEqual(b.rowClues);
+    }
+    // Different tiers on the same day differ (different sizes guarantee it).
+    const e = getDailyPuzzle("2025-05-20", "easy");
+    const m = getDailyPuzzle("2025-05-20", "medium");
+    const h = getDailyPuzzle("2025-05-20", "hard");
+    expect(e.size).not.toBe(m.size);
+    expect(m.size).not.toBe(h.size);
+  });
+
+  it("each tier produces a healthy variety of distinct puzzles", () => {
+    for (const tier of TIERS) {
+      const seen = new Set<string>();
+      let date = START;
+      for (let i = 0; i < 30; i++) {
+        seen.add(JSON.stringify(getDailyPuzzle(date, tier).solution));
+        date = addDays(date, 1);
+      }
+      expect(seen.size, `low variety on ${tier}`).toBeGreaterThan(5);
+    }
+  });
+
+  it("isSolved + getHint work at non-default grid sizes", () => {
+    for (const tier of ["easy", "hard"] as Difficulty[]) {
+      const p = getDailyPuzzle("2025-02-02", tier);
+      const size = p.size;
+      const state: State = new Array(cellsFor(size)).fill(0) as State;
+      // resolve the whole board via successive hints
+      let guard = 0;
+      let hint = getHint(p.solution, state);
+      while (hint && guard < cellsFor(size) + 5) {
+        state[hint.index] = hint.value;
+        hint = getHint(p.solution, state);
+        guard++;
+      }
+      expect(getHint(p.solution, state)).toBeNull();
+      expect(isSolved(state, p.solution)).toBe(true);
+    }
   });
 });

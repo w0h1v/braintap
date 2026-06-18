@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { addDays } from "@/lib/daily";
+import type { Difficulty } from "@/lib/types";
 import {
   PADS,
   MAX_ROUNDS,
@@ -12,6 +13,8 @@ import {
   titleForRounds,
   scoreForRounds,
   validateSimon,
+  tierParams,
+  TIER_PARAMS,
   SPEEDS,
   SPEED_FACTORS,
   normalizeSpeed,
@@ -20,6 +23,22 @@ import { getDailyPuzzle } from "./generator";
 
 const START = "2025-01-01";
 const SAMPLE = 200; // ~6+ months of daily puzzles
+const TIERS: Difficulty[] = ["easy", "medium", "hard"];
+
+/**
+ * Simulate a perfect player echoing the sequence up to `target`, verifying the
+ * puzzle is solvable: every tap from round 1 through `target` must be correct.
+ */
+function isSolvableToTarget(p: { sequence: number[] }, target: number): boolean {
+  for (let round = 1; round <= target; round++) {
+    const seq = sequenceForRound(p, round);
+    if (seq.length !== round) return false;
+    for (let step = 0; step < seq.length; step++) {
+      if (!isCorrectTap(p, round, step, seq[step])) return false;
+    }
+  }
+  return true;
+}
 
 describe("simon engine", () => {
   it("a generated puzzle is deterministic per date", () => {
@@ -146,5 +165,97 @@ describe("simon daily puzzles are solvable (solvable bank)", () => {
     const p = getDailyPuzzle(START);
     const seen = new Set(p.sequence);
     expect(seen.size).toBe(PADS);
+  });
+});
+
+describe("simon difficulty tiers", () => {
+  it("tier parameters escalate: speed gets faster and target gets longer", () => {
+    const easy = tierParams("easy");
+    const medium = tierParams("medium");
+    const hard = tierParams("hard");
+
+    // Target sequence length to WIN strictly increases with difficulty.
+    expect(easy.target).toBeLessThan(medium.target);
+    expect(medium.target).toBeLessThan(hard.target);
+
+    // Playback gets faster (smaller gap factor) as difficulty rises.
+    expect(easy.speed).toBe("slow");
+    expect(medium.speed).toBe("normal");
+    expect(hard.speed).toBe("fast");
+    expect(SPEED_FACTORS[easy.speed]).toBeGreaterThan(SPEED_FACTORS[medium.speed]);
+    expect(SPEED_FACTORS[medium.speed]).toBeGreaterThan(SPEED_FACTORS[hard.speed]);
+
+    // The map and the accessor agree.
+    for (const d of TIERS) {
+      expect(tierParams(d)).toEqual(TIER_PARAMS[d]);
+    }
+  });
+
+  it("getDailyPuzzle is deterministic per (date, difficulty) and carries tier params", () => {
+    for (const d of TIERS) {
+      const a = getDailyPuzzle("2025-03-14", d);
+      const b = getDailyPuzzle("2025-03-14", d);
+      expect(a.sequence).toEqual(b.sequence);
+      expect(a.difficulty).toBe(d);
+      expect(a.speed).toBe(TIER_PARAMS[d].speed);
+      expect(a.target).toBe(TIER_PARAMS[d].target);
+    }
+  });
+
+  it("omitting difficulty yields the medium tier (legacy default)", () => {
+    const def = getDailyPuzzle("2025-03-14");
+    const med = getDailyPuzzle("2025-03-14", "medium");
+    expect(def.sequence).toEqual(med.sequence);
+    expect(def.difficulty).toBe("medium");
+    expect(def.speed).toBe("normal");
+    expect(def.target).toBe(TIER_PARAMS.medium.target);
+  });
+
+  it("each tier yields an independent daily sequence (tier-scoped seed)", () => {
+    // On the same date the three tiers should generally differ from each other,
+    // proving the seed is namespaced per tier rather than shared.
+    let date = START;
+    let easyVsMedium = 0;
+    let mediumVsHard = 0;
+    const DAYS = 30;
+    for (let i = 0; i < DAYS; i++) {
+      const e = getDailyPuzzle(date, "easy");
+      const m = getDailyPuzzle(date, "medium");
+      const h = getDailyPuzzle(date, "hard");
+      // Compare a long prefix so a chance short-prefix match doesn't count.
+      const pe = e.sequence.slice(0, 16).join("");
+      const pm = m.sequence.slice(0, 16).join("");
+      const ph = h.sequence.slice(0, 16).join("");
+      if (pe !== pm) easyVsMedium++;
+      if (pm !== ph) mediumVsHard++;
+      date = addDays(date, 1);
+    }
+    // Overwhelmingly different across a month of dates.
+    expect(easyVsMedium).toBeGreaterThan(DAYS - 3);
+    expect(mediumVsHard).toBeGreaterThan(DAYS - 3);
+  });
+
+  it("every tier is well-formed and solvable to its target across many days", () => {
+    for (const d of TIERS) {
+      const { target } = tierParams(d);
+      let date = START;
+      for (let i = 0; i < SAMPLE; i++) {
+        const p = getDailyPuzzle(date, d);
+
+        // Well-formed: full-length, in-range pad indices.
+        expect(validateSimon(p), `tier ${d} validator failed on ${date}`).toBe(true);
+        expect(p.sequence.length, `tier ${d} wrong length on ${date}`).toBe(MAX_ROUNDS);
+
+        // The win target is reachable (target <= MAX_ROUNDS) and a perfect
+        // player can echo every round up to it.
+        expect(target).toBeLessThanOrEqual(MAX_ROUNDS);
+        expect(
+          isSolvableToTarget(p, target),
+          `tier ${d} not solvable to target ${target} on ${date}`,
+        ).toBe(true);
+
+        date = addDays(date, 1);
+      }
+    }
   });
 });

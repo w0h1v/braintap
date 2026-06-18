@@ -1,10 +1,13 @@
 import { rngFromString } from "@/lib/rng";
-import { dailySeed, bankIndex } from "@/lib/daily";
+import { bankIndex } from "@/lib/daily";
+import { difficultySeed } from "@/lib/difficulty";
+import type { Difficulty } from "@/lib/types";
 import type { Rng } from "@/lib/rng";
 import { BANK } from "./bank";
 import {
   CELLS,
   packGrid,
+  MAX_HINTS_BY_DIFFICULTY,
   type StrandsPuzzle,
   type ThemeEntry,
   type Placement,
@@ -69,8 +72,15 @@ function subsetSum(
   return dfs(0, target) ? chosen.slice() : null;
 }
 
-/** Build a packed puzzle for a single theme entry deterministically. */
-export function buildPuzzle(entry: ThemeEntry, rng: Rng): StrandsPuzzle | null {
+/**
+ * Build a packed puzzle for a single theme entry deterministically. `maxHints`
+ * (default 1) sets the tier's hint generosity on the resulting puzzle.
+ */
+export function buildPuzzle(
+  entry: ThemeEntry,
+  rng: Rng,
+  maxHints = 1,
+): StrandsPuzzle | null {
   const spangram = entry.spangram.toUpperCase();
   const target = CELLS - spangram.length;
   const words = chooseWords(entry.words, target, rng);
@@ -96,29 +106,43 @@ export function buildPuzzle(entry: ThemeEntry, rng: Rng): StrandsPuzzle | null {
     insight: entry.insight,
     grid,
     placements: map,
+    maxHints,
   };
 }
 
-/** Deterministic daily puzzle for a date (memoised per date). */
-export function getDailyPuzzle(dateISO: string): StrandsPuzzle {
-  const hit = cache.get(dateISO);
+/**
+ * Deterministic daily puzzle for a date AND difficulty tier (memoised per
+ * date+tier). The tier selects:
+ *  - a DIFFERENT board, via a tier-scoped bank index ("strands#<tier>"), so each
+ *    tier shows its own theme on a given day; and
+ *  - hint generosity (maxHints): easy=3, medium=1, hard=0.
+ * Omitting the difficulty yields the medium puzzle.
+ */
+export function getDailyPuzzle(
+  dateISO: string,
+  difficulty: Difficulty = "medium",
+): StrandsPuzzle {
+  const key = `${dateISO}:${difficulty}`;
+  const hit = cache.get(key);
   if (hit) return hit;
 
-  const rng = rngFromString(`strands:${dailySeed("strands", dateISO)}`);
+  const rng = rngFromString(`strands:${difficultySeed("strands", dateISO, difficulty)}`);
+  const maxHints = MAX_HINTS_BY_DIFFICULTY[difficulty];
 
-  // Walk the bank from the daily index; if a particular theme fails to pack on
-  // this seed, advance to the next theme so every date yields a puzzle.
-  const start = bankIndex("strands", BANK.length, dateISO);
+  // Walk the bank from the tier-scoped daily index so each tier surfaces a
+  // different board; if a particular theme fails to pack on this seed, advance
+  // to the next theme so every (date, tier) yields a puzzle.
+  const start = bankIndex(`strands#${difficulty}`, BANK.length, dateISO);
   let puzzle: StrandsPuzzle | null = null;
   for (let off = 0; off < BANK.length; off++) {
     const entry = BANK[(start + off) % BANK.length];
-    puzzle = buildPuzzle(entry, rng);
+    puzzle = buildPuzzle(entry, rng, maxHints);
     if (puzzle) break;
   }
   if (!puzzle) {
-    throw new Error(`strands: failed to build a puzzle for ${dateISO}`);
+    throw new Error(`strands: failed to build a puzzle for ${dateISO} (${difficulty})`);
   }
 
-  cache.set(dateISO, puzzle);
+  cache.set(key, puzzle);
   return puzzle;
 }

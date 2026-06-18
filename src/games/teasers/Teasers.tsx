@@ -8,7 +8,6 @@ import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
 import {
-  RIDDLES_PER_DAY,
   scoreFromCorrect,
   verdict,
   type TeasersPuzzle,
@@ -24,7 +23,7 @@ const WRONG = "#ff5a7c";
 const SURFACE = "min(92vw, 520px)";
 
 interface TeasersState {
-  /** Index of the riddle currently shown (0..RIDDLES_PER_DAY). */
+  /** Index of the riddle currently shown (0..riddle count for the tier). */
   index: number;
   /** Per-riddle chosen option index; -1 = not yet answered. */
   picks: number[];
@@ -32,8 +31,28 @@ interface TeasersState {
   done: boolean;
 }
 
-function emptyPicks(): number[] {
-  return new Array(RIDDLES_PER_DAY).fill(-1);
+function emptyPicks(n: number): number[] {
+  return new Array(n).fill(-1);
+}
+
+/**
+ * Resolve initial state from a possibly-stale saved blob. The host namespaces
+ * saves per tier, but a save written by an older build may carry a different
+ * riddle count (or a malformed shape) — so we only adopt saved picks when they
+ * match the current puzzle length, otherwise we start fresh.
+ */
+function initialState(
+  saved: TeasersState | null,
+  count: number,
+): { index: number; picks: number[] } {
+  const fresh = { index: 0, picks: emptyPicks(count) };
+  if (!saved || saved.done) return fresh;
+  if (!Array.isArray(saved.picks) || saved.picks.length !== count) return fresh;
+  const idx =
+    typeof saved.index === "number" && saved.index >= 0 && saved.index <= count
+      ? saved.index
+      : 0;
+  return { index: idx, picks: saved.picks.slice() };
 }
 
 export function Teasers({
@@ -45,14 +64,18 @@ export function Teasers({
 }: GameComponentProps<TeasersPuzzle, TeasersState>) {
   const saved = savedState ?? null;
   const replaying = saved?.done ?? false;
+  const count = puzzle.riddles.length;
+
+  // Identity for the current tier's puzzle; switching tiers swaps `puzzle`,
+  // which we detect to reset run state below.
+  const puzzleKey = useMemo(
+    () => puzzle.riddles.map((r) => r.question).join("|"),
+    [puzzle.riddles],
+  );
 
   // When replaying a finished day, start fresh from the top.
-  const [index, setIndex] = useState<number>(() =>
-    saved && !saved.done ? saved.index : 0,
-  );
-  const [picks, setPicks] = useState<number[]>(() =>
-    saved && !saved.done && Array.isArray(saved.picks) ? saved.picks.slice() : emptyPicks(),
-  );
+  const [index, setIndex] = useState<number>(() => initialState(saved, count).index);
+  const [picks, setPicks] = useState<number[]>(() => initialState(saved, count).picks);
   const [done, setDone] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [shake, setShake] = useState(false);
@@ -77,6 +100,21 @@ export function Teasers({
   // The bar fills as you commit answers, completing fully on the last reveal.
   const answeredCount = picks.filter((p) => p !== -1).length;
   const progressPct = Math.round((answeredCount / total) * 100);
+
+  // When the host switches difficulty, the puzzle (and its riddle count)
+  // changes. Reset the run to a fresh start for the new tier. We skip the very
+  // first render (mount) so resumed saved state isn't clobbered.
+  const mountedKey = useRef(puzzleKey);
+  useEffect(() => {
+    if (mountedKey.current === puzzleKey) return;
+    mountedKey.current = puzzleKey;
+    completedRef.current = false;
+    setIndex(0);
+    setPicks(emptyPicks(puzzle.riddles.length));
+    setDone(false);
+    setShowModal(false);
+    setShake(false);
+  }, [puzzleKey, puzzle.riddles.length]);
 
   // Persist resumable state (JSON-serialisable).
   useEffect(() => {
@@ -115,8 +153,11 @@ export function Teasers({
     haptics.win();
     sfx.win();
     const score = scoreFromCorrect(correctCount, total);
-    const status = correctCount >= 3 ? "won" : "played";
-    const stars = correctCount >= 5 ? 3 : correctCount >= 3 ? 2 : 1;
+    // Completing all of the day's riddles counts as a win (and unlocks the next
+    // tier on the host). Stars still reward accuracy.
+    const status = "won" as const;
+    const stars =
+      correctCount >= total ? 3 : correctCount / total >= 0.6 ? 2 : 1;
     const emoji = puzzle.riddles
       .map((r, i) => (picks[i] === r.answerIndex ? "🟩" : "🟥"))
       .join("");
@@ -454,8 +495,8 @@ export function Teasers({
         onClose={() => setShowModal(false)}
         accent={ACCENT}
         eyebrow="RIDDLES COMPLETE"
-        won={correctCount >= 3}
-        title={verdict(correctCount)}
+        won
+        title={verdict(correctCount, total)}
         statValue={`${correctCount}/${total}`}
         statLabel="RIDDLES CRACKED"
         insight={INSIGHT}

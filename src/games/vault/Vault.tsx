@@ -8,9 +8,9 @@ import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
 import {
+  INITIAL_LEVEL,
   GRID,
-  CELLS,
-  MAX_ROUNDS,
+  cellsFor,
   levelForRound,
   showDuration,
   evaluateTap,
@@ -34,6 +34,10 @@ interface VaultState {
   ended: boolean;
   /** Whether the run was won (cleared all rounds). */
   won: boolean;
+  /** Grid edge length the saved progress belongs to (back-compat optional). */
+  grid?: number;
+  /** Starting pattern size the saved progress belongs to (back-compat optional). */
+  initialLevel?: number;
 }
 
 export function Vault({
@@ -43,26 +47,48 @@ export function Vault({
   onPersistState,
   reducedMotion,
 }: GameComponentProps<VaultPuzzle, VaultState>) {
+  // Tier parameters come from the puzzle the host passes in.
+  const grid = puzzle.grid ?? GRID;
+  const cells = cellsFor(grid);
+  const initialLevel = puzzle.initialLevel ?? INITIAL_LEVEL;
+  const maxRounds = puzzle.rounds.length;
+
+  // Only resume a saved run when it belongs to THIS tier (same grid + start
+  // size). Older saves (no grid/initialLevel) are assumed to be the medium
+  // default so they never crash; mismatched tiers start fresh.
   const saved = savedState ?? null;
+  const savedMatchesTier =
+    saved != null &&
+    (saved.grid ?? GRID) === grid &&
+    (saved.initialLevel ?? INITIAL_LEVEL) === initialLevel;
 
   const [round, setRound] = useState(() =>
-    saved && !saved.ended ? saved.round : 1,
+    savedMatchesTier && saved && !saved.ended ? saved.round : 1,
   );
   const [phase, setPhase] = useState<Phase>("idle");
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [lit, setLit] = useState<Set<number>>(new Set()); // cells shown cyan
   const [badCell, setBadCell] = useState<number | null>(null);
-  const [ended, setEnded] = useState(saved?.ended ?? false);
-  const [won, setWon] = useState(saved?.won ?? false);
+  const [ended, setEnded] = useState(savedMatchesTier ? saved?.ended ?? false : false);
+  const [won, setWon] = useState(savedMatchesTier ? saved?.won ?? false : false);
   const [showModal, setShowModal] = useState(false);
   const [shake, setShake] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
 
   const completedRef = useRef(false);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // Timing: accumulate input-phase wall-clock so the host's unified timer has a
+  // matching result.timeMs. (The host owns the visible clock; we keep logic.)
+  const startedAtRef = useRef<number | null>(null);
+  const elapsedRef = useRef(0);
 
-  const level = levelForRound(round);
-  const pattern = puzzle.rounds[Math.min(round, MAX_ROUNDS) - 1];
+  // The active tier signature; when the host switches difficulty the puzzle (and
+  // thus this signature) changes and we reset the in-progress run.
+  const tierSig = `${grid}:${initialLevel}:${maxRounds}`;
+  const lastTierSigRef = useRef(tierSig);
+
+  const level = levelForRound(round, initialLevel);
+  const pattern = puzzle.rounds[Math.min(round, maxRounds) - 1];
 
   // Clean up any pending timers on unmount.
   useEffect(() => {
@@ -78,11 +104,32 @@ export function Vault({
     return t;
   }, []);
 
-  // Persist resumable progress (highest round reached + end status).
+  // React to a difficulty/tier switch from the host: reset to a fresh run.
   useEffect(() => {
-    onPersistState?.({ round, ended, won });
+    if (lastTierSigRef.current === tierSig) return;
+    lastTierSigRef.current = tierSig;
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    completedRef.current = false;
+    startedAtRef.current = null;
+    elapsedRef.current = 0;
+    setRound(1);
+    setPhase("idle");
+    setPicked(new Set());
+    setLit(new Set());
+    setBadCell(null);
+    setEnded(false);
+    setWon(false);
+    setShowModal(false);
+    setShake(false);
+    setHasStarted(false);
+  }, [tierSig]);
+
+  // Persist resumable progress (highest round reached + end status + tier).
+  useEffect(() => {
+    onPersistState?.({ round, ended, won, grid, initialLevel });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [round, ended, won]);
+  }, [round, ended, won, grid, initialLevel]);
 
   const remaining = phase === "input" ? Math.max(0, level - picked.size) : 0;
 
@@ -105,15 +152,23 @@ export function Vault({
     (didWin: boolean, finalRound: number) => {
       if (completedRef.current) return;
       completedRef.current = true;
+      // Capture any in-flight input time.
+      if (startedAtRef.current != null) {
+        elapsedRef.current += Date.now() - startedAtRef.current;
+        startedAtRef.current = null;
+      }
+      const timeMs = Math.round(elapsedRef.current);
       setEnded(true);
       setWon(didWin);
       setPhase("over");
 
-      const reach = didWin ? MAX_ROUNDS + 1 : finalRound;
-      const held = didWin ? levelForRound(MAX_ROUNDS) : levelForRound(finalRound) - 1;
+      const reach = didWin ? maxRounds + 1 : finalRound;
+      const held = didWin
+        ? levelForRound(maxRounds, initialLevel)
+        : levelForRound(finalRound, initialLevel) - 1;
       // Score: progress through the run (0..100). A win is 100.
-      const cleared = didWin ? MAX_ROUNDS : finalRound - 1;
-      const score = didWin ? 100 : Math.round((cleared / MAX_ROUNDS) * 100);
+      const cleared = didWin ? maxRounds : finalRound - 1;
+      const score = didWin ? 100 : Math.round((cleared / maxRounds) * 100);
 
       if (didWin) {
         haptics.win();
@@ -126,16 +181,17 @@ export function Vault({
       schedule(() => setShowModal(true), didWin ? 400 : 280);
 
       onComplete({
-        status: didWin ? "won" : "played",
+        status: didWin ? "won" : "lost",
         score,
+        timeMs,
         moves: cleared,
         shareText: `BrainTap · Memory Vault\nReached round ${reach} (${held} cells held)\n\n${
           "🟦".repeat(Math.min(cleared, 10)) || "—"
         }\nbraintap.app/games`,
-        detail: { reach, held, won: didWin },
+        detail: { reach, held, won: didWin, grid },
       });
     },
-    [onComplete, schedule],
+    [onComplete, schedule, maxRounds, initialLevel, grid],
   );
 
   const startRound = useCallback(() => {
@@ -153,21 +209,27 @@ export function Vault({
     schedule(() => {
       setLit(new Set());
       setPhase("input");
+      // Start the recall clock once the player must act.
+      startedAtRef.current = Date.now();
     }, dur);
   }, [ended, pattern, level, reducedMotion, schedule]);
 
   const advance = useCallback(() => {
-    // Round fully rebuilt.
+    // Round fully rebuilt — bank its input time.
+    if (startedAtRef.current != null) {
+      elapsedRef.current += Date.now() - startedAtRef.current;
+      startedAtRef.current = null;
+    }
     sfx.correct();
     haptics.success();
     const nextRound = round + 1;
-    if (round >= MAX_ROUNDS) {
+    if (round >= maxRounds) {
       endGame(true, round);
       return;
     }
     setRound(nextRound);
     setPhase("cleared");
-  }, [round, endGame]);
+  }, [round, endGame, maxRounds]);
 
   const pick = useCallback(
     (cell: number) => {
@@ -218,15 +280,15 @@ export function Vault({
       {/* Status header: round + progress dots */}
       <div className="mb-2.5 flex w-full max-w-[420px] items-center justify-between font-mono text-[10.5px] tracking-[0.12em]">
         <span style={{ color: ACCENT.soft }}>
-          ROUND {Math.min(round, MAX_ROUNDS)}/{MAX_ROUNDS} · {level} CELLS
+          ROUND {Math.min(round, maxRounds)}/{maxRounds} · {level} CELLS
         </span>
         <span
           className="flex items-center gap-[5px]"
           role="img"
-          aria-label={`${Math.min(round - 1, MAX_ROUNDS)} of ${MAX_ROUNDS} rounds cleared`}
+          aria-label={`${Math.min(round - 1, maxRounds)} of ${maxRounds} rounds cleared`}
         >
-          {Array.from({ length: MAX_ROUNDS }, (_, i) => {
-            const done = i < Math.min(round - 1, MAX_ROUNDS);
+          {Array.from({ length: maxRounds }, (_, i) => {
+            const done = i < Math.min(round - 1, maxRounds);
             return (
               <span
                 key={i}
@@ -280,13 +342,13 @@ export function Vault({
           "grid w-full max-w-[min(92vw,420px)] gap-[2.2vw] sm:gap-[9px]",
           shake && !reducedMotion && "animate-shake",
         )}
-        style={{ gridTemplateColumns: `repeat(${GRID}, 1fr)` }}
+        style={{ gridTemplateColumns: `repeat(${grid}, 1fr)` }}
         role="grid"
         aria-label="Memory vault grid"
       >
-        {Array.from({ length: CELLS }, (_, i) => {
-          const r = Math.floor(i / GRID);
-          const c = i % GRID;
+        {Array.from({ length: cells }, (_, i) => {
+          const r = Math.floor(i / grid);
+          const c = i % grid;
           const state = cellState(i);
           const interactive = phase === "input" && !ended;
 
@@ -396,12 +458,12 @@ export function Vault({
         won={won}
         eyebrow="VAULT MASTERED"
         title={won ? "Vault mastered." : "Sequence broken."}
-        statValue={`Round ${won ? MAX_ROUNDS + 1 : round}`}
-        statLabel={`${won ? levelForRound(MAX_ROUNDS) : Math.max(0, level - 1)} CELLS HELD`}
+        statValue={`Round ${won ? maxRounds + 1 : round}`}
+        statLabel={`${won ? levelForRound(maxRounds, initialLevel) : Math.max(0, level - 1)} CELLS HELD`}
         insight={INSIGHT}
-        share={`BrainTap · Memory Vault\nReached round ${won ? MAX_ROUNDS + 1 : round} (${
-          won ? levelForRound(MAX_ROUNDS) : Math.max(0, level - 1)
-        } cells held)\n\n${"🟦".repeat(Math.min(won ? MAX_ROUNDS : round - 1, 10)) || "—"}\nbraintap.app/games`}
+        share={`BrainTap · Memory Vault\nReached round ${won ? maxRounds + 1 : round} (${
+          won ? levelForRound(maxRounds, initialLevel) : Math.max(0, level - 1)
+        } cells held)\n\n${"🟦".repeat(Math.min(won ? maxRounds : round - 1, 10)) || "—"}\nbraintap.app/games`}
       />
 
       {!reducedMotion && (

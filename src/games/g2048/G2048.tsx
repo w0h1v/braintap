@@ -16,6 +16,7 @@ import {
   hasWon,
   maxTile,
   moveWithPaths,
+  targetOf,
   type Direction,
   type G2048Puzzle,
 } from "./engine";
@@ -67,10 +68,15 @@ interface G2048State {
   spawnIndex: number;
   won: boolean;
   over: boolean;
-  /** Player chose to keep playing after reaching 2048. */
+  /** Player chose to keep playing after reaching the target. */
   continued: boolean;
   /** Set once onComplete has fired, so it only fires a single time. */
   completed: boolean;
+  /**
+   * Accumulated play time (ms) for the run, persisted so a resumed game keeps a
+   * meaningful clock. Optional for backward-compatibility with older saves.
+   */
+  elapsedMs?: number;
 }
 
 /**
@@ -119,8 +125,16 @@ export function G2048({
   savedState,
   onPersistState,
   reducedMotion = false,
+  // hostTimer is honoured below: when true the host shows a unified timer, so
+  // this component never renders its own visible clock (it has none), while all
+  // internal timing logic is kept so result.timeMs is still reported.
+  hostTimer = false,
 }: GameComponentProps<G2048Puzzle, G2048State>) {
   const saved = savedState ?? null;
+
+  // The win target is driven by the difficulty tier the host selects, via the
+  // puzzle it passes (legacy puzzles fall back to the medium 512 target).
+  const target = targetOf(puzzle);
 
   const [grid, setGrid] = useState<number[]>(() => saved?.grid ?? puzzle.start.slice());
   const [score, setScore] = useState(() => saved?.score ?? 0);
@@ -145,6 +159,38 @@ export function G2048({
 
   const completedRef = useRef(saved?.completed ?? false);
   const movesRef = useRef(0);
+
+  // --- Timing -----------------------------------------------------------------
+  // Wall-clock play time for the run, so result.timeMs is reported. The host
+  // owns the *visible* timer (hostTimer); this component keeps the logic only.
+  // We accumulate elapsed ms: a session that resumes a save continues from the
+  // persisted total. The clock advances only while the game is still playable.
+  const baseElapsedRef = useRef<number>(
+    typeof saved?.elapsedMs === "number" && saved.elapsedMs >= 0 ? saved.elapsedMs : 0,
+  );
+  // Timestamp (Date.now) the current run segment started; null when paused/over.
+  const segStartRef = useRef<number | null>(null);
+  // The frozen final time (ms) captured the moment the run ends.
+  const finalMsRef = useRef<number | null>(null);
+  const [elapsedMs, setElapsedMs] = useState<number>(baseElapsedRef.current);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /** Total elapsed = persisted base + the live current segment. */
+  const computeElapsed = useCallback(() => {
+    const seg = segStartRef.current != null ? Date.now() - segStartRef.current : 0;
+    return baseElapsedRef.current + seg;
+  }, []);
+
+  /** Fold the live segment into the base (used on pause/finish/persist). */
+  const settleElapsed = useCallback(() => {
+    if (segStartRef.current != null) {
+      baseElapsedRef.current += Date.now() - segStartRef.current;
+      segStartRef.current = null;
+    }
+    setElapsedMs(baseElapsedRef.current);
+    return baseElapsedRef.current;
+  }, []);
+
   const gainIdRef = useRef(0);
   const nudgeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Pending post-slide timers (spawn-in, merge cleanup) — cleared on unmount. */
@@ -158,8 +204,35 @@ export function G2048({
   const animatingRef = useRef(false);
 
   // The game is locked only when it is over, or won AND the player has not opted
-  // to keep playing past 2048 (the spec allows continuing for a higher score).
+  // to keep playing past the target (the spec allows continuing for a higher
+  // score).
   const locked = over || (won && !continued);
+
+  // Run the play clock while the game is live (not over, not finished). When the
+  // run ends, finalMsRef holds the frozen time. A "Keep playing" un-locks and
+  // the clock resumes (the persisted total carries the earlier segment).
+  useEffect(() => {
+    const live = !over && !(won && !continued) && finalMsRef.current == null;
+    if (live) {
+      if (segStartRef.current == null) segStartRef.current = Date.now();
+      if (!tickRef.current) {
+        tickRef.current = setInterval(() => setElapsedMs(computeElapsed()), 250);
+      }
+    } else {
+      // Pause: fold the live segment into the base and stop ticking.
+      settleElapsed();
+      if (tickRef.current) {
+        clearInterval(tickRef.current);
+        tickRef.current = null;
+      }
+    }
+    return () => {
+      if (tickRef.current) {
+        clearInterval(tickRef.current);
+        tickRef.current = null;
+      }
+    };
+  }, [over, won, continued, computeElapsed, settleElapsed]);
 
   // Persist resumable state (JSON-serialisable only).
   useEffect(() => {
@@ -172,6 +245,7 @@ export function G2048({
       over,
       continued,
       completed: completedRef.current,
+      elapsedMs: computeElapsed(),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [grid, score, best, spawnIndex, won, over, continued]);
@@ -180,35 +254,78 @@ export function G2048({
   useEffect(() => {
     return () => {
       if (nudgeTimer.current) clearTimeout(nudgeTimer.current);
+      if (tickRef.current) clearInterval(tickRef.current);
       for (const t of animTimers.current) clearTimeout(t);
     };
   }, []);
+
+  // React to a difficulty switch from the host: the puzzle (start board + win
+  // target) changes, so reset the in-progress game to the new tier's opening.
+  // The host hands us the tier's own savedState, but if a fresh tier has no
+  // save we still need to clear the previous tier's live board. We key off the
+  // puzzle's start signature + target so identical puzzles don't reset.
+  const puzzleSig = `${target}:${puzzle.start.join(",")}`;
+  const lastPuzzleSigRef = useRef(puzzleSig);
+  useEffect(() => {
+    if (lastPuzzleSigRef.current === puzzleSig) return;
+    lastPuzzleSigRef.current = puzzleSig;
+    // Adopt the new tier's saved progress if present, else its fresh opening.
+    const nextGrid = saved?.grid ?? puzzle.start.slice();
+    for (const t of animTimers.current) clearTimeout(t);
+    animTimers.current = [];
+    animatingRef.current = false;
+    finalMsRef.current = null;
+    segStartRef.current = null;
+    baseElapsedRef.current =
+      typeof saved?.elapsedMs === "number" && saved.elapsedMs >= 0 ? saved.elapsedMs : 0;
+    completedRef.current = saved?.completed ?? false;
+    movesRef.current = 0;
+    setGrid(nextGrid);
+    setScore(saved?.score ?? 0);
+    setBest(saved?.best ?? 0);
+    setSpawnIndex(saved?.spawnIndex ?? 0);
+    setWon(saved?.won ?? false);
+    setOver(saved?.over ?? false);
+    setContinued(saved?.continued ?? false);
+    setShowModal(false);
+    setElapsedMs(baseElapsedRef.current);
+    const rebuilt = tilesFromGrid(nextGrid, idRef.current);
+    idRef.current = rebuilt.nextId;
+    setTiles(rebuilt.tiles);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzleSig]);
 
   const fireComplete = useCallback(
     (finalGrid: number[], finalScore: number, didWin: boolean) => {
       if (completedRef.current) return;
       completedRef.current = true;
+      // Freeze the play time at the moment the run ends.
+      const timeMs = settleElapsed();
+      finalMsRef.current = timeMs;
       const top = maxTile(finalGrid);
-      // Normalised 0–100: reaching 2048 is a 100; otherwise scale by the largest
-      // tile reached (each doubling from 2 is one step toward the win tile).
-      const log = Math.log2(Math.max(2, top)); // 1..11
+      // Normalised 0–100: reaching the tier target is a 100; otherwise scale by
+      // the largest tile reached relative to the target (each doubling is one
+      // step toward the target).
+      const logTop = Math.log2(Math.max(2, top));
+      const logTarget = Math.log2(target);
       const score100 = didWin
         ? 100
-        : Math.max(5, Math.min(95, Math.round((log / 11) * 100)));
+        : Math.max(5, Math.min(95, Math.round((logTop / logTarget) * 100)));
       const shareText = `BrainTap · 2048\n${
-        didWin ? "Reached 2048! 🟪" : `Best tile ${top} · Score ${finalScore}`
+        didWin ? `Reached ${target}! 🟪` : `Best tile ${top} · Score ${finalScore}`
       }\n\nbraintap.app/games`;
       if (!reducedMotion) setTimeout(() => setShowModal(true), 300);
       else setShowModal(true);
       onComplete({
         status: didWin ? "won" : "lost",
         score: score100,
+        timeMs,
         moves: movesRef.current,
         shareText,
-        detail: { score: finalScore, bestTile: top, won: didWin },
+        detail: { score: finalScore, bestTile: top, won: didWin, target },
       });
     },
-    [onComplete, reducedMotion],
+    [onComplete, reducedMotion, settleElapsed, target],
   );
 
   const doMove = useCallback(
@@ -320,7 +437,7 @@ export function G2048({
         animTimers.current.push(t1);
       }
 
-      const didWin = !won && hasWon(after);
+      const didWin = !won && hasWon(after, target);
       if (didWin) {
         setWon(true);
         haptics.win();
@@ -336,7 +453,7 @@ export function G2048({
         fireComplete(after, nextScore, false);
       }
     },
-    [grid, tiles, locked, puzzle.spawns, spawnIndex, score, best, won, reducedMotion, fireComplete],
+    [grid, tiles, locked, puzzle.spawns, spawnIndex, score, best, won, reducedMotion, fireComplete, target],
   );
 
   // Keyboard: arrows + WASD.
@@ -380,26 +497,35 @@ export function G2048({
 
   const finalTop = useMemo(() => maxTile(grid), [grid]);
 
-  // Progress toward the 2048 milestone, by doublings (2 → 2048 is 10 steps).
+  // Progress toward the tier target, by doublings (2 → target).
   const progress = useMemo(() => {
-    const log = Math.log2(Math.max(2, finalTop)); // 1..11
-    return Math.max(0, Math.min(1, (log - 1) / 10));
-  }, [finalTop]);
+    const steps = Math.log2(target) - 1; // doublings from 2 up to the target
+    const log = Math.log2(Math.max(2, finalTop));
+    return Math.max(0, Math.min(1, (log - 1) / steps));
+  }, [finalTop, target]);
 
   const statusMsg = over
     ? "No moves left — game over"
     : won && !continued
-      ? "🎉 You reached 2048!"
+      ? `🎉 You reached ${target}!`
       : won
         ? "Keep merging for a higher score"
         : "";
 
-  // Screen-reader status: concise board summary + state.
-  const srStatus = over
-    ? `Game over. Final score ${score}. Best tile ${finalTop}.`
-    : won
-      ? `You reached 2048. Score ${score}.`
-      : `Score ${score}. Largest tile ${finalTop}.`;
+  // Screen-reader status: concise board summary + state. When the host is NOT
+  // showing its unified timer, include the elapsed time here so the running
+  // clock is still announced; when hostTimer is true we suppress it to avoid a
+  // duplicate readout (the host owns the visible/announced timer).
+  const timeSuffix =
+    !hostTimer && (won || over || score > 0)
+      ? ` Time ${(elapsedMs / 1000).toFixed(0)} seconds.`
+      : "";
+  const srStatus =
+    (over
+      ? `Game over. Final score ${score}. Best tile ${finalTop}.`
+      : won
+        ? `You reached ${target}. Score ${score}.`
+        : `Score ${score}. Largest tile ${finalTop}.`) + timeSuffix;
 
   // Subtle directional shift used to acknowledge a rejected move.
   const nudgeTransform = (() => {
@@ -442,7 +568,7 @@ export function G2048({
           className="mt-0.5 font-mono text-[10.5px] tracking-[0.16em]"
           style={{ color: ACCENT.soft }}
         >
-          MERGE UP TO 2048
+          MERGE UP TO {target}
         </p>
       </div>
 
@@ -606,7 +732,7 @@ export function G2048({
         onClose={() => setShowModal(false)}
         accent={ACCENT}
         won={won}
-        eyebrow={won ? "TILE 2048 REACHED" : "GAME OVER"}
+        eyebrow={won ? `TILE ${target} REACHED` : "GAME OVER"}
         title={won ? "You did it." : "Nice run."}
         statValue={String(score)}
         statLabel="SCORE"
@@ -632,7 +758,7 @@ export function G2048({
           </div>
         }
         share={`BrainTap · 2048\n${
-          won ? "Reached 2048! 🟪" : `Best tile ${finalTop} · Score ${score}`
+          won ? `Reached ${target}! 🟪` : `Best tile ${finalTop} · Score ${score}`
         }\n\nbraintap.app/games`}
       />
 

@@ -3,6 +3,7 @@ import { addDays } from "@/lib/daily";
 import {
   WORD_LEN,
   MAX_ROWS,
+  MAX_ROWS_BY_DIFFICULTY,
   isWellFormed,
   isValidGuess,
   evaluateGuess,
@@ -15,6 +16,7 @@ import {
   hintFor,
   type Verdict,
 } from "./engine";
+import { DIFFICULTIES } from "@/lib/difficulty";
 import { ANSWERS, VALID, THEMED, HINTS } from "./words";
 import { getDailyPuzzle } from "./generator";
 
@@ -160,6 +162,11 @@ describe("brainle share + scoring", () => {
     expect(loss).toContain("X/6");
   });
 
+  it("buildShareText honours a tier-specific guess allowance", () => {
+    expect(buildShareText(true, ["FOCUS", "BRAIN"], "BRAIN", 7)).toContain("2/7");
+    expect(buildShareText(false, ["FOCUS"], "BRAIN", 5)).toContain("X/5");
+  });
+
   it("computeScore rewards fewer guesses and gives a floor on loss", () => {
     expect(computeScore(true, 1)).toBe(100);
     expect(computeScore(true, 6)).toBe(60);
@@ -213,5 +220,75 @@ describe("brainle daily puzzles are solvable (solvable bank)", () => {
 
   it("respects MAX_ROWS as 6", () => {
     expect(MAX_ROWS).toBe(6);
+  });
+});
+
+describe("brainle difficulty tiers", () => {
+  it("escalates the guess allowance: easy 7 > medium 6 > hard 5", () => {
+    expect(MAX_ROWS_BY_DIFFICULTY.easy).toBe(7);
+    expect(MAX_ROWS_BY_DIFFICULTY.medium).toBe(6);
+    expect(MAX_ROWS_BY_DIFFICULTY.hard).toBe(5);
+    expect(MAX_ROWS_BY_DIFFICULTY.easy).toBeGreaterThan(MAX_ROWS_BY_DIFFICULTY.medium);
+    expect(MAX_ROWS_BY_DIFFICULTY.medium).toBeGreaterThan(MAX_ROWS_BY_DIFFICULTY.hard);
+  });
+
+  it("omitting difficulty yields the medium puzzle (legacy default)", () => {
+    let date = START;
+    for (let i = 0; i < 30; i++) {
+      expect(getDailyPuzzle(date)).toEqual(getDailyPuzzle(date, "medium"));
+      date = addDays(date, 1);
+    }
+  });
+
+  it("each tier is deterministic and self-solvable across many days", () => {
+    for (const diff of DIFFICULTIES) {
+      let date = START;
+      for (let i = 0; i < SAMPLE; i++) {
+        const p = getDailyPuzzle(date, diff);
+
+        // determinism per (date, tier)
+        expect(getDailyPuzzle(date, diff)).toEqual(p);
+
+        // module validator agrees and the answer is guessable
+        expect(validateBrainle(p), `${diff} validator failed on ${date}`).toBe(true);
+        expect(isWellFormed(p.answer)).toBe(true);
+        expect(VALID.has(p.answer), `${p.answer} not guessable ${diff} ${date}`).toBe(true);
+        expect(p.answer.length).toBe(WORD_LEN);
+
+        // the guess allowance matches the tier knob
+        expect(p.maxGuesses).toBe(MAX_ROWS_BY_DIFFICULTY[diff]);
+
+        // a player who guesses the answer wins
+        expect(isWin(evaluateGuess(p.answer, p.answer))).toBe(true);
+
+        date = addDays(date, 1);
+      }
+    }
+  });
+
+  it("the three tiers give different words on (almost) every day", () => {
+    let date = START;
+    let distinctDays = 0;
+    const total = SAMPLE;
+    for (let i = 0; i < total; i++) {
+      const e = getDailyPuzzle(date, "easy").answer;
+      const m = getDailyPuzzle(date, "medium").answer;
+      const h = getDailyPuzzle(date, "hard").answer;
+      if (e !== m && m !== h && e !== h) distinctDays++;
+      date = addDays(date, 1);
+    }
+    // Tier-scoped offsets keep the three words apart on the vast majority of days.
+    expect(distinctDays).toBeGreaterThan(total * 0.9);
+  });
+
+  it("hard is biased toward the less-common (post-themed) pool", () => {
+    let date = START;
+    for (let i = 0; i < SAMPLE; i++) {
+      const p = getDailyPuzzle(date, "hard");
+      // Hard never serves a curated themed word; it draws from the common region.
+      expect(THEMED.includes(p.answer), `hard served themed ${p.answer}`).toBe(false);
+      expect(p.index).toBeGreaterThanOrEqual(THEMED.length);
+      date = addDays(date, 1);
+    }
   });
 });

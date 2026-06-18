@@ -10,4 +10,5 @@ export default defineGame<ReversiPuzzle, any>({
   getDailyPuzzle,
   Component: Reversi,
   validatePuzzle: validateReversi,
+  supportsDifficulty: true,
 });

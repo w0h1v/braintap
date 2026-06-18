@@ -5,6 +5,7 @@
  * (>= 4 letters) that uses only hive letters and includes the center.
  */
 
+import type { Difficulty } from "@/lib/types";
 import { WORD_SET } from "./dictionary";
 
 export const HIVE_SIZE = 7;
@@ -12,6 +13,36 @@ export const OUTER_SIZE = 6;
 export const MIN_WORD_LEN = 4;
 /** A puzzle must surface at least this many findable words to ship. */
 export const MIN_WORDS = 15;
+
+/**
+ * Per-tier word-count goal as a fraction of the hive's total findable words.
+ * Easy asks for a shallow dip into the hive, hard demands a deep clear. The
+ * goal is what a player must reach for the daily to count as "won".
+ */
+export const GOAL_FRACTION: Record<Difficulty, number> = {
+  easy: 0.25,
+  medium: 0.5,
+  hard: 0.75,
+};
+
+/** Never ask for fewer than this many words, even on a lean hive. */
+export const MIN_GOAL = 3;
+
+/**
+ * The word-count goal for a hive at a tier: a fraction of the findable words,
+ * rounded up, clamped to [MIN_GOAL, total]. Deterministic and pure.
+ */
+export function goalForWords(
+  totalFindable: number,
+  difficulty: Difficulty = "medium",
+): number {
+  if (totalFindable <= 0) return 0;
+  const frac = GOAL_FRACTION[difficulty] ?? GOAL_FRACTION.medium;
+  const raw = Math.ceil(totalFindable * frac);
+  // Floor at MIN_GOAL, then cap at the words on offer so a lean hive's goal is
+  // still reachable (total is the hard ceiling).
+  return Math.min(totalFindable, Math.max(MIN_GOAL, raw));
+}
 
 export interface WeaverPuzzle {
   /** The single required center letter (uppercase A–Z). */
@@ -24,6 +55,14 @@ export interface WeaverPuzzle {
   totalScore: number;
   /** The shortest pangram word (uses all 7 letters). */
   pangram: string;
+  /** The active difficulty tier this puzzle was built for. */
+  difficulty?: Difficulty;
+  /**
+   * Number of words a player must find to WIN this tier. The host unlocks the
+   * next tier only on a win, so reaching `goal` is what fires status "won".
+   * Optional for backward compatibility with older saved/archived shapes.
+   */
+  goal?: number;
 }
 
 /** Rank thresholds as a fraction of totalScore (ascending). */
@@ -201,6 +240,20 @@ export function validateWeaver(p: WeaverPuzzle): boolean {
 
   const calc = scoreWords(p.valid, hive);
   if (calc !== p.totalScore) return false;
+
+  // Optional tier fields: validate only when present so older puzzle shapes
+  // (built without a difficulty/goal) still pass.
+  if (p.difficulty !== undefined) {
+    if (p.difficulty !== "easy" && p.difficulty !== "medium" && p.difficulty !== "hard") {
+      return false;
+    }
+  }
+  if (p.goal !== undefined) {
+    if (!Number.isInteger(p.goal)) return false;
+    // A goal must be reachable: at least MIN_GOAL and no more than the words on offer.
+    if (p.goal < Math.min(MIN_GOAL, p.valid.length)) return false;
+    if (p.goal > p.valid.length) return false;
+  }
 
   return true;
 }

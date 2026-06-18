@@ -18,6 +18,7 @@ import {
   scoreToNormalised,
   tierTitle,
   buildShareText,
+  isWin,
   type SprintPuzzle,
 } from "./engine";
 
@@ -55,10 +56,15 @@ export function Sprint({
   savedState,
   onPersistState,
   reducedMotion,
+  hostTimer = false,
 }: GameComponentProps<SprintPuzzle, SprintState>) {
   const saved = savedState ?? null;
   // A finished saved game starts back at idle so the player can replay.
   const resumable = saved && saved.phase === "playing";
+  // Tier params drive the digit range, target sizes, and the win goal. Guard
+  // against older puzzle shapes that lack params (treat as the medium default).
+  const params = puzzle.params ?? { goal: 5, minTargetCells: 2, maxTargetCells: 3 };
+  const goal = params.goal ?? 5;
 
   const [grid, setGrid] = useState<number[]>(
     () => (resumable ? saved!.grid.slice() : puzzle.grid.slice()),
@@ -139,19 +145,26 @@ export function Sprint({
       completedRef.current = true;
       setPhase("done");
       deadlineRef.current = null;
-      setLiveStatus(`Time! Final score ${finalScore} target${finalScore === 1 ? "" : "s"}.`);
+      const won = isWin(finalScore, puzzle.params);
+      setLiveStatus(
+        `Time! Final score ${finalScore} target${finalScore === 1 ? "" : "s"}.` +
+          (won ? " Goal reached." : ` Need ${goal} to clear.`),
+      );
       haptics.win();
       sfx.win();
       setTimeout(() => setShowModal(true), reducedMotion ? 0 : 260);
       onComplete({
-        status: "played",
+        // The host unlocks the next tier only on "won"; clearing the tier goal
+        // wins the round, otherwise it's a loss for this attempt.
+        status: won ? "won" : "lost",
         score: scoreToNormalised(finalScore),
         timeMs: DURATION_MS,
-        detail: { cleared: finalScore },
+        detail: { cleared: finalScore, goal },
         shareText: buildShareText(finalScore),
       });
     },
-    [onComplete, reducedMotion],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onComplete, reducedMotion, puzzle.params, goal],
   );
 
   useEffect(() => {
@@ -209,12 +222,12 @@ export function Sprint({
       setIssued((prevIssued) => {
         const nextIssued = prevIssued + 1;
         const rng = targetRng(puzzle.seed, nextIssued);
-        const { target: t } = pickTarget(liveGrid, rng);
+        const { target: t } = pickTarget(liveGrid, rng, puzzle.params);
         setTarget(t);
         return nextIssued;
       });
     },
-    [puzzle.seed],
+    [puzzle.seed, puzzle.params],
   );
 
   const clearOnOvershoot = useCallback(() => {
@@ -332,7 +345,9 @@ export function Sprint({
 
   return (
     <div className="flex w-full flex-col items-center">
-      {/* stats bar */}
+      {/* stats bar. When the host owns the unified timer we suppress our own
+          SECONDS chip (timing logic is untouched) and show the win goal so the
+          player still knows the per-tier clear target. */}
       <div className="grid w-full max-w-[420px] grid-cols-3 gap-2.5">
         <StatCard
           value={phase === "idle" ? "—" : String(target)}
@@ -342,14 +357,18 @@ export function Sprint({
           flashColor={ACCENT.solid}
           accentBorder
         />
-        <StatCard
-          value={String(remainingSec)}
-          label="SECONDS"
-          color={timeLow ? "#ff8a4c" : "#ffb020"}
-          pulse={timeLow && !reducedMotion}
-          progress={phase === "playing" ? timeFrac : undefined}
-          progressColor={timeLow ? "#ff8a4c" : "#ffb020"}
-        />
+        {hostTimer ? (
+          <StatCard value={String(goal)} label="GOAL" color="#ffb020" />
+        ) : (
+          <StatCard
+            value={String(remainingSec)}
+            label="SECONDS"
+            color={timeLow ? "#ff8a4c" : "#ffb020"}
+            pulse={timeLow && !reducedMotion}
+            progress={phase === "playing" ? timeFrac : undefined}
+            progressColor={timeLow ? "#ff8a4c" : "#ffb020"}
+          />
+        )}
         <StatCard
           value={String(score)}
           label="SCORE"
@@ -498,7 +517,7 @@ export function Sprint({
         statLabel="TARGETS CLEARED · 60S"
         insight={INSIGHT}
         share={buildShareText(finalScore)}
-        won={finalScore > 0}
+        won={isWin(finalScore, puzzle.params)}
       />
     </div>
   );

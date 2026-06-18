@@ -51,6 +51,13 @@ export interface ReversiPuzzle {
   firstTurn: Player;
   /** AI aggressiveness 0..1 — weights flip-count more heavily when high. */
   aggressiveness: number;
+  /**
+   * AI strength for this puzzle, set by the daily difficulty tier. Optional for
+   * backward-compat with older puzzles/saves — callers fall back to the default
+   * "normal" profile when it's absent. The daily board stays canonical; this
+   * only tunes how strongly the AI plays.
+   */
+  aiDifficulty?: Difficulty;
 }
 
 export const idx = (r: number, c: number): number => r * SIZE + c;
@@ -94,6 +101,25 @@ const PROFILES: Record<Difficulty, StrengthProfile> = {
 };
 
 export const profileFor = (d: Difficulty): StrengthProfile => PROFILES[d];
+
+/**
+ * Host difficulty tier — the shared Easy/Medium/Hard the GameHost selects. This
+ * is distinct from the engine's own (easy/normal/hard) AI strength levels.
+ */
+export type Tier = "easy" | "medium" | "hard";
+
+/**
+ * Map a host tier to the engine's AI strength. The daily board never changes;
+ * only AI strength escalates: easy = weak (greedy + noise), medium = normal
+ * (greedy positional), hard = strong (minimax look-ahead).
+ */
+const TIER_TO_DIFFICULTY: Record<Tier, Difficulty> = {
+  easy: "easy",
+  medium: "normal",
+  hard: "hard",
+};
+
+export const tierToDifficulty = (t: Tier): Difficulty => TIER_TO_DIFFICULTY[t];
 
 /** The standard Othello starting position. */
 export function initialBoard(): Board {
@@ -303,6 +329,8 @@ export function simulateGame(puzzle: ReversiPuzzle, rng: Rng): { board: Board; p
   let board = initialBoard();
   let turn: Player = puzzle.firstTurn;
   let plies = 0;
+  // The puzzle's tier strength drives both sides when set (else historical default).
+  const aiDiff = puzzle.aiDifficulty ?? DEFAULT_DIFFICULTY;
   // 64 cells max; with passes, bound generously to guarantee termination.
   for (let guard = 0; guard < CELLS * 2 + 4; guard++) {
     if (isGameOver(board)) break;
@@ -311,7 +339,7 @@ export function simulateGame(puzzle: ReversiPuzzle, rng: Rng): { board: Board; p
       turn = opponent(turn);
       continue;
     }
-    const m = chooseAiMove(board, turn, puzzle.aggressiveness, rng);
+    const m = chooseAiMove(board, turn, puzzle.aggressiveness, rng, aiDiff);
     board = applyMove(board, rowOf(m), colOf(m), turn);
     plies++;
     turn = opponent(turn);
@@ -328,6 +356,7 @@ export function validateReversi(puzzle: ReversiPuzzle): boolean {
   if (puzzle.playerColor !== YOU && puzzle.playerColor !== AI) return false;
   if (puzzle.firstTurn !== YOU && puzzle.firstTurn !== AI) return false;
   if (puzzle.aggressiveness < 0 || puzzle.aggressiveness > 1) return false;
+  if (puzzle.aiDifficulty !== undefined && !isDifficulty(puzzle.aiDifficulty)) return false;
 
   const start = initialBoard();
   // Both sides must have an opening move (standard Othello guarantees this).

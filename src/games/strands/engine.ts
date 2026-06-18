@@ -64,7 +64,21 @@ export interface StrandsPuzzle {
   grid: string[][];
   /** Solution paths keyed by word (includes the spangram). */
   placements: Record<string, Placement>;
+  /**
+   * Hint generosity for this puzzle, set by the difficulty tier: how many hints
+   * the player may spend. Easy is generous, hard offers none. Optional so older
+   * saved/built shapes (without the field) still type-check; the component
+   * falls back to a sane default when it is missing.
+   */
+  maxHints?: number;
 }
+
+/** Hints available per difficulty tier: easy generous, hard none. */
+export const MAX_HINTS_BY_DIFFICULTY: Record<string, number> = {
+  easy: 3,
+  medium: 1,
+  hard: 0,
+};
 
 export const idx = (r: number, c: number): number => r * COLS + c;
 export const inBounds = (r: number, c: number): boolean =>

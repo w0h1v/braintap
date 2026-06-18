@@ -5,6 +5,8 @@ import {
   CELLS,
   SIZE,
   WIN_TILE,
+  TARGET_BY_DIFFICULTY,
+  DEFAULT_TARGET,
   idx,
   slideLine,
   move,
@@ -12,6 +14,7 @@ import {
   canMove,
   hasWon,
   maxTile,
+  targetOf,
   emptyCells,
   applySpawn,
   resolveSpawnCell,
@@ -22,9 +25,11 @@ import {
   type Grid,
 } from "./engine";
 import { getDailyPuzzle } from "./generator";
+import type { Difficulty } from "@/lib/types";
 
 const START = "2025-01-01";
 const SAMPLE = 200; // ~6+ months of daily puzzles
+const TIERS: Difficulty[] = ["easy", "medium", "hard"];
 
 describe("g2048 slide + merge", () => {
   it("slides tiles toward index 0 without merging distinct values", () => {
@@ -234,5 +239,156 @@ describe("g2048 daily puzzles are solvable (solvable across the archive)", () =>
     expect(validateG2048(badStart)).toBe(false); // zero tiles
     const badSpawns = { ...good, spawns: [{ value: 8, pick: 0 }] } as never;
     expect(validateG2048(badSpawns)).toBe(false);
+    const badTarget = { ...good, target: 333 } as never;
+    expect(validateG2048(badTarget)).toBe(false); // unsupported target
+  });
+});
+
+describe("g2048 difficulty tiers", () => {
+  it("each tier carries the intended escalating win target", () => {
+    expect(TARGET_BY_DIFFICULTY.easy).toBe(256);
+    expect(TARGET_BY_DIFFICULTY.medium).toBe(512);
+    expect(TARGET_BY_DIFFICULTY.hard).toBe(1024);
+    // strictly escalating
+    expect(TARGET_BY_DIFFICULTY.easy).toBeLessThan(TARGET_BY_DIFFICULTY.medium);
+    expect(TARGET_BY_DIFFICULTY.medium).toBeLessThan(TARGET_BY_DIFFICULTY.hard);
+    // omitting difficulty yields the medium target (legacy default)
+    expect(getDailyPuzzle(START).target).toBe(DEFAULT_TARGET);
+    expect(DEFAULT_TARGET).toBe(TARGET_BY_DIFFICULTY.medium);
+  });
+
+  it("getDailyPuzzle stamps the tier target and is deterministic per (date, tier)", () => {
+    for (const tier of TIERS) {
+      const a = getDailyPuzzle("2025-04-09", tier);
+      const b = getDailyPuzzle("2025-04-09", tier);
+      expect(a.target).toBe(TARGET_BY_DIFFICULTY[tier]);
+      expect(targetOf(a)).toBe(TARGET_BY_DIFFICULTY[tier]);
+      expect(a.start).toEqual(b.start);
+      expect(a.spawns).toEqual(b.spawns);
+    }
+  });
+
+  it("tiers open with different boards on the same day", () => {
+    const e = getDailyPuzzle("2025-04-09", "easy");
+    const m = getDailyPuzzle("2025-04-09", "medium");
+    const h = getDailyPuzzle("2025-04-09", "hard");
+    // Distinct per-tier seeds => the start board and/or spawn script differ.
+    const sig = (p: typeof e) => JSON.stringify(p.start) + "|" + JSON.stringify(p.spawns);
+    expect(sig(e)).not.toBe(sig(m));
+    expect(sig(m)).not.toBe(sig(h));
+    expect(sig(e)).not.toBe(sig(h));
+  });
+
+  it(`every tier is well-formed, playable and validates across ${SAMPLE} days`, () => {
+    for (const tier of TIERS) {
+      let date = START;
+      for (let i = 0; i < SAMPLE; i++) {
+        const p = getDailyPuzzle(date, tier);
+        const tiles = p.start.filter((v) => v !== 0);
+        expect(tiles.length, `${tier} start tile count on ${date}`).toBe(2);
+        expect(
+          tiles.every((v) => v === 2 || v === 4),
+          `${tier} start tile values on ${date}`,
+        ).toBe(true);
+        expect(emptyCells(p.start).length, `${tier} empties on ${date}`).toBe(CELLS - 2);
+        expect(canMove(p.start), `${tier} no opening move on ${date}`).toBe(true);
+        expect(p.target, `${tier} target on ${date}`).toBe(TARGET_BY_DIFFICULTY[tier]);
+        expect(validateG2048(p), `${tier} validator failed on ${date}`).toBe(true);
+        date = addDays(date, 1);
+      }
+    }
+  });
+
+  it("a lookahead solver reaches each tier's target (the tier is winnable)", () => {
+    // For each tier, drive the daily (deterministic, scripted) spawn sequence
+    // with a depth-limited lookahead solver and assert the player can reach that
+    // tier's target tile. Because spawns are scripted, the lookahead is exact.
+    // A monotonicity + empty-cells + corner heuristic reliably climbs past 1024
+    // on a 4×4 board — enough to prove every tier (256/512/1024) is winnable.
+    const order: Direction[] = ["D", "L", "R", "U"];
+
+    // Snake weight matrix: keeps large tiles in a corner along a monotone path.
+    const W = [
+      [15, 14, 13, 12],
+      [8, 9, 10, 11],
+      [7, 6, 5, 4],
+      [0, 1, 2, 3],
+    ];
+    const heuristic = (g: Grid): number => {
+      let h = emptyCells(g).length * 270;
+      for (let r = 0; r < SIZE; r++) {
+        for (let c = 0; c < SIZE; c++) {
+          const v = g[idx(r, c)];
+          if (v > 0) h += v * W[r][c];
+        }
+      }
+      return h;
+    };
+
+    // Best total heuristic reachable in `depth` moves, replaying scripted spawns.
+    const search = (g: Grid, si: number, depth: number): number => {
+      if (depth === 0) return heuristic(g);
+      let best = -Infinity;
+      for (const d of order) {
+        const r = move(g, d);
+        if (!r.moved) continue;
+        const ng = applySpawn(r.grid, SPAWN(si));
+        const v = r.gained + search(ng, si + 1, depth - 1);
+        if (v > best) best = v;
+      }
+      return best === -Infinity ? heuristic(g) : best;
+    };
+
+    // Per-run scripted spawn accessor, bound inside the loop below.
+    let SPAWN: (si: number) => ReturnType<typeof makeSpawn>;
+
+    for (const tier of TIERS) {
+      const target = TARGET_BY_DIFFICULTY[tier];
+      let won = false;
+      let date = START;
+      for (let day = 0; day < 10 && !won; day++) {
+        const p = getDailyPuzzle(date, tier);
+        SPAWN = (si: number) => p.spawns[si % p.spawns.length];
+        let g = p.start.slice();
+        let si = 0;
+        let guard = 0;
+        while (!hasWon(g, target) && guard < 10000) {
+          guard++;
+          // Pick the move maximising a depth-3 scripted lookahead.
+          let bestDir: Direction | null = null;
+          let bestVal = -Infinity;
+          for (const d of order) {
+            const r = move(g, d);
+            if (!r.moved) continue;
+            const ng = applySpawn(r.grid, SPAWN(si));
+            const v = r.gained + search(ng, si + 1, 3);
+            if (v > bestVal) {
+              bestVal = v;
+              bestDir = d;
+            }
+          }
+          if (!bestDir) break; // no legal move — game over
+          const res = move(g, bestDir);
+          g = applySpawn(res.grid, SPAWN(si));
+          si++;
+        }
+        if (hasWon(g, target)) {
+          won = true;
+          expect(maxTile(g)).toBeGreaterThanOrEqual(target);
+        }
+        date = addDays(date, 1);
+      }
+      expect(won, `tier ${tier} (target ${target}) was never reached in 10 days`).toBe(true);
+    }
+  });
+
+  it("hasWon honours a custom target and defaults to the classic 2048", () => {
+    const g: Grid = new Array(CELLS).fill(0);
+    g[0] = 256;
+    expect(hasWon(g, 256)).toBe(true);
+    expect(hasWon(g, 512)).toBe(false);
+    expect(hasWon(g)).toBe(false); // default WIN_TILE = 2048
+    g[1] = WIN_TILE;
+    expect(hasWon(g)).toBe(true);
   });
 });

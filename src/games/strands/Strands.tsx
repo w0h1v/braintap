@@ -23,7 +23,8 @@ import {
   type StrandsPuzzle,
 } from "./engine";
 
-const MAX_HINTS = 2;
+/** Fallback hint budget for older puzzle shapes that predate `maxHints`. */
+const DEFAULT_MAX_HINTS = 2;
 const HINT_PENALTY = 12;
 
 const ACCENT = GAME_METAS.strands.accent;
@@ -53,10 +54,14 @@ export function Strands({
   savedState,
   onPersistState,
   reducedMotion,
+  hostTimer = false,
 }: GameComponentProps<StrandsPuzzle, StrandsState>) {
   const saved = savedState ?? null;
   const targets = useMemo(() => [puzzle.spangram, ...puzzle.words], [puzzle]);
   const total = targets.length;
+  // Hint generosity comes from the puzzle's difficulty tier (easy=3, medium=1,
+  // hard=0). Guard against older puzzle shapes that lack the field.
+  const maxHints = puzzle.maxHints ?? DEFAULT_MAX_HINTS;
 
   const [found, setFound] = useState<string[]>(() => saved?.found ?? []);
   const [hintsUsed, setHintsUsed] = useState<number>(() => saved?.hintsUsed ?? 0);
@@ -169,7 +174,7 @@ export function Strands({
 
   /** Spend a hint: reveal one not-yet-found word by lighting its path cells. */
   const useHint = useCallback(() => {
-    if (won || hintsUsed >= MAX_HINTS) return;
+    if (won || hintsUsed >= maxHints) return;
     const hint = getHint(puzzle, found);
     if (!hint) return;
     const next = hintsUsed + 1;
@@ -188,7 +193,7 @@ export function Strands({
     if (hintTimer.current) clearTimeout(hintTimer.current);
     // Hold the highlight long enough to read, then clear (instant if reduced).
     hintTimer.current = setTimeout(() => setHintCells(new Set()), reducedMotion ? 1400 : 2200);
-  }, [won, hintsUsed, puzzle, found, flash, reducedMotion]);
+  }, [won, hintsUsed, maxHints, puzzle, found, flash, reducedMotion]);
 
   /** Resolve a completed selection path against the targets. */
   const resolvePath = useCallback(
@@ -496,7 +501,11 @@ export function Strands({
           {found.length} / {total} found
           {spangramFound && <span style={{ color: SPANGRAM_COLOR }}> · spangram ✓</span>}
         </span>
-        <span className="tabular-nums text-ink-mute">{formatClock(clock.ms)}</span>
+        {/* When the host owns the timer it renders a unified clock; hide our own
+            chip to avoid a duplicate (timing logic stays live for result.timeMs). */}
+        {!hostTimer && (
+          <span className="tabular-nums text-ink-mute">{formatClock(clock.ms)}</span>
+        )}
       </div>
 
       {/* progress bar */}
@@ -678,13 +687,16 @@ export function Strands({
         >
           Clear
         </button>
-        <HintButton
-          used={hintsUsed}
-          max={MAX_HINTS}
-          onHint={useHint}
-          accent={ACCENT}
-          disabled={won || remaining <= 0}
-        />
+        {/* Hard tier offers no hints (maxHints === 0): omit the button entirely. */}
+        {maxHints > 0 && (
+          <HintButton
+            used={hintsUsed}
+            max={maxHints}
+            onHint={useHint}
+            accent={ACCENT}
+            disabled={won || remaining <= 0}
+          />
+        )}
         <button
           type="button"
           onClick={submit}

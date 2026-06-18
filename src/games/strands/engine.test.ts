@@ -16,9 +16,18 @@ import {
 } from "./engine";
 import { BANK } from "./bank";
 import { buildPuzzle, getDailyPuzzle } from "./generator";
+import { DIFFICULTIES } from "@/lib/difficulty";
+import type { Difficulty } from "@/lib/types";
 
 const START = "2025-01-01";
 const DAYS = 200; // >180 days
+
+/** Expected hint generosity per tier (easy generous, hard none). */
+const EXPECTED_MAX_HINTS: Record<Difficulty, number> = {
+  easy: 3,
+  medium: 1,
+  hard: 0,
+};
 
 describe("strands engine primitives", () => {
   it("adjacency is 8-directional and excludes self", () => {
@@ -159,5 +168,84 @@ describe("strands daily puzzles are solvable (solvable bank)", () => {
     expect(a.grid).toEqual(b.grid);
     expect(a.words).toEqual(b.words);
     expect(a.theme).toBe(b.theme);
+  });
+
+  it("defaults to the medium tier when difficulty is omitted", () => {
+    const def = getDailyPuzzle("2025-03-14");
+    const med = getDailyPuzzle("2025-03-14", "medium");
+    expect(def.theme).toBe(med.theme);
+    expect(def.grid).toEqual(med.grid);
+    expect(def.maxHints).toBe(med.maxHints);
+  });
+});
+
+describe("strands difficulty tiers", () => {
+  it("each tier is valid + solvable across many days with the right hint budget", () => {
+    for (const tier of DIFFICULTIES) {
+      let date = START;
+      for (let i = 0; i < DAYS; i++) {
+        const p = getDailyPuzzle(date, tier);
+
+        // Well-formed + fully solvable per the module validator.
+        expect(validatePuzzle(p), `${tier} validator failed on ${date}`).toBe(true);
+
+        // Exactly 48 letters across all targets.
+        const total = p.spangram.length + p.words.reduce((n, w) => n + w.length, 0);
+        expect(total, `${tier} letter count off on ${date}`).toBe(CELLS);
+
+        // Every target is findable as a connected path (fwd or reversed).
+        for (const w of [p.spangram, ...p.words]) {
+          const fwd = findWordPaths(p.grid, w);
+          const rev = findWordPaths(p.grid, w.split("").reverse().join(""));
+          expect(
+            fwd.length + rev.length,
+            `${w} not findable (${tier}) on ${date}`,
+          ).toBeGreaterThanOrEqual(1);
+        }
+
+        // Tier knob: hint generosity escalates downward as difficulty rises.
+        expect(p.maxHints, `${tier} maxHints wrong on ${date}`).toBe(
+          EXPECTED_MAX_HINTS[tier],
+        );
+
+        date = addDays(date, 1);
+      }
+    }
+  });
+
+  it("hint budget strictly decreases easy → medium → hard", () => {
+    const easy = getDailyPuzzle("2025-03-14", "easy");
+    const medium = getDailyPuzzle("2025-03-14", "medium");
+    const hard = getDailyPuzzle("2025-03-14", "hard");
+    expect(easy.maxHints!).toBeGreaterThan(medium.maxHints!);
+    expect(medium.maxHints!).toBeGreaterThan(hard.maxHints!);
+    expect(hard.maxHints).toBe(0);
+  });
+
+  it("serves a DIFFERENT board per tier on a given day (mostly distinct)", () => {
+    // Across a span of days, the three tiers should rarely coincide because
+    // each uses a tier-scoped bank index. Require the vast majority distinct.
+    let date = START;
+    let allThreeDistinct = 0;
+    const SAMPLE = 60;
+    for (let i = 0; i < SAMPLE; i++) {
+      const e = getDailyPuzzle(date, "easy").theme;
+      const m = getDailyPuzzle(date, "medium").theme;
+      const h = getDailyPuzzle(date, "hard").theme;
+      if (e !== m && m !== h && e !== h) allThreeDistinct++;
+      date = addDays(date, 1);
+    }
+    // With a 63-entry bank and distinct per-tier offsets, near-all days differ.
+    expect(allThreeDistinct).toBeGreaterThan(SAMPLE - 5);
+  });
+
+  it("is deterministic per (date, tier)", () => {
+    for (const tier of DIFFICULTIES) {
+      const a = getDailyPuzzle("2025-04-02", tier);
+      const b = getDailyPuzzle("2025-04-02", tier);
+      expect(a.grid).toEqual(b.grid);
+      expect(a.theme).toBe(b.theme);
+      expect(a.maxHints).toBe(b.maxHints);
+    }
   });
 });

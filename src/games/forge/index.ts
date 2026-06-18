@@ -10,4 +10,5 @@ export default defineGame<ForgePuzzle, any>({
   getDailyPuzzle,
   Component: Forge,
   validatePuzzle: validateForge,
+  supportsDifficulty: true,
 });

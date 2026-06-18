@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import type { Difficulty } from "@/lib/types";
 import { addDays } from "@/lib/daily";
 import {
   N,
@@ -17,6 +18,9 @@ import {
   scramble,
   validateSlide,
   nextBestMove,
+  cellsFor,
+  isSlideSize,
+  sizeOf,
   type Board,
 } from "./engine";
 import { rngFromString } from "@/lib/rng";
@@ -25,11 +29,11 @@ import { getDailyPuzzle } from "./generator";
 const START = "2025-01-01";
 const SAMPLE = 200; // > 180 days
 
-function isPermutation(b: Board): boolean {
-  if (b.length !== CELLS) return false;
-  const seen = new Array(CELLS).fill(false);
+function isPermutation(b: Board, cells: number = CELLS): boolean {
+  if (b.length !== cells) return false;
+  const seen = new Array(cells).fill(false);
   for (const v of b) {
-    if (!Number.isInteger(v) || v < 0 || v >= CELLS || seen[v]) return false;
+    if (!Number.isInteger(v) || v < 0 || v >= cells || seen[v]) return false;
     seen[v] = true;
   }
   return true;
@@ -227,6 +231,98 @@ describe("slide engine — nextBestMove hint", () => {
     const best = manhattan(applyMove(b, mv));
     for (const p of neighbors(blankPos(b))) {
       expect(manhattan(applyMove(b, p))).toBeGreaterThanOrEqual(best);
+    }
+  });
+});
+
+describe("slide daily puzzles — difficulty tiers", () => {
+  const TIERS: Difficulty[] = ["easy", "medium", "hard"];
+  const EXPECTED_SIZE: Record<Difficulty, number> = { easy: 3, medium: 4, hard: 5 };
+
+  it("each tier maps to its grid size: easy=3, medium=4, hard=5", () => {
+    for (const tier of TIERS) {
+      const p = getDailyPuzzle(START, tier);
+      expect(p.size, `wrong size for ${tier}`).toBe(EXPECTED_SIZE[tier]);
+      expect(isSlideSize(p.size)).toBe(true);
+      expect(p.goal).toEqual(solvedBoard(p.size));
+    }
+  });
+
+  it(`every tier is solvable, shuffled and valid across ${SAMPLE} days`, () => {
+    let date = START;
+    for (let i = 0; i < SAMPLE; i++) {
+      for (const tier of TIERS) {
+        const p = getDailyPuzzle(date, tier);
+        const psize = sizeOf(p.start);
+        const cells = cellsFor(psize);
+
+        // the declared size matches the board and the expected tier size
+        expect(p.size, `${tier} declared size on ${date}`).toBe(EXPECTED_SIZE[tier]);
+        expect(psize).toBe(EXPECTED_SIZE[tier]);
+
+        // well-formed permutation of 0..cells-1
+        expect(isPermutation(p.start, cells), `${tier} not a permutation on ${date}`).toBe(true);
+        expect(p.goal).toEqual(solvedBoard(psize));
+
+        // solvable by parity for this grid size
+        expect(isBoardSolvable(p.start, psize), `${tier} not solvable on ${date}`).toBe(true);
+
+        // not already solved (non-trivial)
+        expect(isSolved(p.start), `${tier} trivially solved on ${date}`).toBe(false);
+
+        // module validator agrees
+        expect(validateSlide(p), `${tier} validator failed on ${date}`).toBe(true);
+      }
+      date = addDays(date, 1);
+    }
+  });
+
+  it("scramble depth escalates with the tier (easy < medium < hard)", () => {
+    const easy = getDailyPuzzle(START, "easy");
+    const medium = getDailyPuzzle(START, "medium");
+    const hard = getDailyPuzzle(START, "hard");
+    expect(easy.scrambleSteps).toBeLessThan(medium.scrambleSteps);
+    expect(medium.scrambleSteps).toBeLessThan(hard.scrambleSteps);
+  });
+
+  it("grid size escalates with the tier (easy < medium < hard)", () => {
+    const easy = getDailyPuzzle(START, "easy");
+    const medium = getDailyPuzzle(START, "medium");
+    const hard = getDailyPuzzle(START, "hard");
+    expect(sizeOf(easy.start)).toBeLessThan(sizeOf(medium.start));
+    expect(sizeOf(medium.start)).toBeLessThan(sizeOf(hard.start));
+  });
+
+  it("tiers on the same date are independent puzzles", () => {
+    const easy = getDailyPuzzle("2025-03-14", "easy");
+    const medium = getDailyPuzzle("2025-03-14", "medium");
+    const hard = getDailyPuzzle("2025-03-14", "hard");
+    // Different sizes already guarantee different arrays; assert lengths differ.
+    expect(easy.start.length).not.toBe(medium.start.length);
+    expect(medium.start.length).not.toBe(hard.start.length);
+  });
+
+  it("is deterministic per (date, difficulty) and memoised", () => {
+    for (const tier of TIERS) {
+      const a = getDailyPuzzle("2025-04-01", tier);
+      const b = getDailyPuzzle("2025-04-01", tier);
+      expect(a.start).toEqual(b.start);
+      expect(a).toBe(b); // memoised: identical reference for same (date, tier)
+    }
+  });
+
+  it("omitting difficulty yields the medium 4×4 puzzle", () => {
+    const plain = getDailyPuzzle("2025-05-05");
+    const medium = getDailyPuzzle("2025-05-05", "medium");
+    expect(plain.size).toBe(4);
+    expect(plain.start).toEqual(medium.start);
+  });
+
+  it("different dates produce different scrambles within a tier", () => {
+    for (const tier of TIERS) {
+      const a = getDailyPuzzle("2025-06-01", tier);
+      const b = getDailyPuzzle("2025-06-02", tier);
+      expect(a.start).not.toEqual(b.start);
     }
   });
 });

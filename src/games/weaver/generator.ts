@@ -1,3 +1,4 @@
+import type { Difficulty } from "@/lib/types";
 import { bankIndex } from "@/lib/daily";
 import { PANGRAMS } from "./pangrams";
 import {
@@ -5,6 +6,7 @@ import {
   scoreWords,
   isPangram,
   hiveLetters,
+  goalForWords,
   type WeaverPuzzle,
 } from "./engine";
 
@@ -13,9 +15,10 @@ const cache = new Map<string, WeaverPuzzle>();
 /**
  * Build a hive from a pangram word: its 7 distinct letters become the hive, and
  * the center is the letter that yields the richest findable-word list (ties
- * broken alphabetically so the choice is deterministic).
+ * broken alphabetically so the choice is deterministic). The tier sets the
+ * word-count goal needed to win — easy asks for a shallow dip, hard a deep clear.
  */
-function buildPuzzle(pangram: string): WeaverPuzzle {
+function buildPuzzle(pangram: string, difficulty: Difficulty): WeaverPuzzle {
   const letters = [...new Set(pangram)].sort();
 
   let best: WeaverPuzzle | null = null;
@@ -34,6 +37,8 @@ function buildPuzzle(pangram: string): WeaverPuzzle {
         valid,
         totalScore: scoreWords(valid, hive),
         pangram: pangrams[0],
+        difficulty,
+        goal: goalForWords(valid.length, difficulty),
       };
     }
   }
@@ -50,20 +55,33 @@ function buildPuzzle(pangram: string): WeaverPuzzle {
       valid,
       totalScore: scoreWords(valid, hive),
       pangram: pangram.toUpperCase(),
+      difficulty,
+      goal: goalForWords(valid.length, difficulty),
     };
   }
 
   return best;
 }
 
-/** Deterministic daily puzzle for a date (memoised per date). */
-export function getDailyPuzzle(dateISO: string): WeaverPuzzle {
-  const hit = cache.get(dateISO);
+/**
+ * Deterministic daily puzzle for a date and difficulty tier (memoised per
+ * date AND tier). Each tier draws a DIFFERENT pangram from the bank via a
+ * tier-scoped bank index, then scales its win goal to the tier: easy needs a
+ * low fraction of the findable words, medium more, hard the most. Omitting the
+ * difficulty yields the medium tier.
+ */
+export function getDailyPuzzle(
+  dateISO: string,
+  difficulty: Difficulty = "medium",
+): WeaverPuzzle {
+  const key = `${dateISO}:${difficulty}`;
+  const hit = cache.get(key);
   if (hit) return hit;
 
-  // bankIndex walks consecutive days through the pangram bank without repeats.
-  const index = bankIndex("weaver", PANGRAMS.length, dateISO);
-  const puzzle = buildPuzzle(PANGRAMS[index]);
-  cache.set(dateISO, puzzle);
+  // A tier-scoped bank key walks each tier through the pangram bank
+  // independently, so the three tiers serve different hives on the same day.
+  const index = bankIndex(`weaver#${difficulty}`, PANGRAMS.length, dateISO);
+  const puzzle = buildPuzzle(PANGRAMS[index], difficulty);
+  cache.set(key, puzzle);
   return puzzle;
 }

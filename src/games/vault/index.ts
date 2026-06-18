@@ -10,4 +10,5 @@ export default defineGame<VaultPuzzle, any>({
   getDailyPuzzle,
   Component: Vault,
   validatePuzzle: validateVault,
+  supportsDifficulty: true,
 });

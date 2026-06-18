@@ -1,7 +1,13 @@
 /**
- * Tap Teasers engine — pure, deterministic logic for a 5-riddle
- * lateral-thinking multiple-choice quiz. No React, no DOM, no globals.
+ * Tap Teasers engine — pure, deterministic logic for a lateral-thinking
+ * multiple-choice riddle quiz. No React, no DOM, no globals.
+ *
+ * Difficulty controls how many riddles are served per day (and, via the
+ * generator, which slice of the bank they come from):
+ *   easy = 3, medium = 5, hard = 7.
  */
+
+import type { Difficulty } from "@/lib/types";
 
 /** A single lateral-thinking riddle. */
 export interface Riddle {
@@ -15,15 +21,29 @@ export interface Riddle {
   aha: string;
 }
 
-/** The daily puzzle: five distinct riddles. */
+/** The daily puzzle: a tier-sized set of distinct riddles. */
 export interface TeasersPuzzle {
   riddles: Riddle[];
+  /** The tier this puzzle was generated for (optional for legacy shapes). */
+  difficulty?: Difficulty;
 }
 
-/** Number of riddles served per day. */
+/** Number of riddles served per day for the default (medium) tier. */
 export const RIDDLES_PER_DAY = 5;
 /** Number of choices per riddle. */
 export const CHOICES = 4;
+
+/** Riddles served per day by difficulty tier: easy=3, medium=5, hard=7. */
+export const RIDDLE_COUNT_BY_DIFFICULTY: Record<Difficulty, number> = {
+  easy: 3,
+  medium: 5,
+  hard: 7,
+};
+
+/** How many riddles a tier serves (defaults to the medium count). */
+export function riddleCountFor(difficulty: Difficulty = "medium"): number {
+  return RIDDLE_COUNT_BY_DIFFICULTY[difficulty] ?? RIDDLES_PER_DAY;
+}
 
 /** True when a single riddle is structurally well-formed. */
 export function validateRiddle(r: Riddle): boolean {
@@ -50,16 +70,30 @@ export function validateRiddle(r: Riddle): boolean {
   return true;
 }
 
-/** Validate a daily puzzle: 5 distinct, well-formed riddles. */
+/** The set of riddle counts any valid tier may produce. */
+const VALID_COUNTS = new Set<number>(Object.values(RIDDLE_COUNT_BY_DIFFICULTY));
+
+/**
+ * Validate a daily puzzle: a tier-sized set of distinct, well-formed riddles.
+ *
+ * When the puzzle carries a `difficulty`, the count must match that tier
+ * exactly; otherwise any recognised tier count (3/5/7) is accepted so legacy
+ * (count-only) puzzles still validate.
+ */
 export function validateTeasers(p: TeasersPuzzle): boolean {
   if (!p || !Array.isArray(p.riddles)) return false;
-  if (p.riddles.length !== RIDDLES_PER_DAY) return false;
+  const n = p.riddles.length;
+  if (p.difficulty) {
+    if (n !== riddleCountFor(p.difficulty)) return false;
+  } else if (!VALID_COUNTS.has(n)) {
+    return false;
+  }
   for (const r of p.riddles) {
     if (!validateRiddle(r)) return false;
   }
   // distinct questions within the day
   const qs = p.riddles.map((r) => r.question.trim().toLowerCase());
-  if (new Set(qs).size !== RIDDLES_PER_DAY) return false;
+  if (new Set(qs).size !== n) return false;
   return true;
 }
 
@@ -69,9 +103,15 @@ export function scoreFromCorrect(correct: number, total = RIDDLES_PER_DAY): numb
   return Math.round((correct / total) * 100);
 }
 
-/** End-screen verdict copy for a given correct count. */
-export function verdict(correct: number): string {
-  if (correct >= 5) return "Flawless lateral thinking.";
-  if (correct >= 3) return "Sharp instincts.";
+/**
+ * End-screen verdict copy for a given correct count out of `total`.
+ *
+ * Thresholds scale with the tier size: a perfect run is "flawless", >=60% is
+ * "sharp", below that needs practice. The default `total` keeps the historical
+ * 5-riddle behaviour for legacy callers.
+ */
+export function verdict(correct: number, total: number = RIDDLES_PER_DAY): string {
+  if (total > 0 && correct >= total) return "Flawless lateral thinking.";
+  if (total > 0 && correct / total >= 0.6) return "Sharp instincts.";
   return "The aha takes practice.";
 }

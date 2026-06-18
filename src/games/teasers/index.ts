@@ -10,4 +10,5 @@ export default defineGame<TeasersPuzzle, any>({
   getDailyPuzzle,
   Component: Teasers,
   validatePuzzle: validateTeasers,
+  supportsDifficulty: true,
 });

@@ -8,7 +8,9 @@ import { defineConfig, devices } from "@playwright/test";
  * running server is reused; in CI a fresh server is booted.
  */
 
-const PORT = 3000;
+// Honour a PORT override so local runs can avoid colliding with another app on
+// 3000 (CI leaves it unset → 3000).
+const PORT = Number(process.env.PORT) || 3000;
 const baseURL = `http://localhost:${PORT}`;
 const isCI = !!process.env.CI;
 
@@ -41,7 +43,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "npm run build && npm run start",
+    command: `npm run build && npm run start -- -p ${PORT}`,
     url: baseURL,
     // In dev, reuse a server you already have running; in CI always boot fresh.
     reuseExistingServer: !isCI,

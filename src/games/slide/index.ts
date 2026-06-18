@@ -10,4 +10,5 @@ export default defineGame<SlidePuzzle, any>({
   getDailyPuzzle,
   Component: Slide,
   validatePuzzle: validateSlide,
+  supportsDifficulty: true,
 });

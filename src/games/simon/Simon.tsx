@@ -9,11 +9,10 @@ import { haptics } from "@/lib/haptics";
 import { cn } from "@/lib/cn";
 import {
   PADS,
+  MAX_ROUNDS,
   PAD_COLORS,
   PAD_NAMES,
   PAD_TONES,
-  SPEEDS,
-  SPEED_LABELS,
   gapForRound,
   normalizeSpeed,
   sequenceForRound,
@@ -36,7 +35,10 @@ type Phase = "idle" | "watching" | "input" | "over";
 interface SimonState {
   best: number;
   played: boolean;
-  /** Persisted speed choice. Optional for backward-compat with old saves. */
+  /**
+   * Legacy persisted speed choice from the pre-tier version. Kept optional so
+   * old saves never crash; the host now owns difficulty/speed so it is ignored.
+   */
   speed?: SimonSpeed;
 }
 
@@ -50,7 +52,16 @@ export function Simon({
   onPersistState,
   reducedMotion = false,
 }: GameComponentProps<SimonPuzzle, SimonState>) {
+  // NOTE on hostTimer: Simon never renders its own visible timer chip, so there
+  // is nothing to hide when the host owns the clock. The run is still timed
+  // internally (t0Ref) so result.timeMs is reported on completion.
   const saved = savedState ?? null;
+
+  // Speed + win target are driven by the difficulty tier the host selects, via
+  // the puzzle it passes. Fall back to safe legacy values for older puzzles.
+  const speed: SimonSpeed = normalizeSpeed(puzzle.speed);
+  const target =
+    typeof puzzle.target === "number" && puzzle.target > 0 ? puzzle.target : MAX_ROUNDS;
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [round, setRound] = useState(0);
@@ -58,9 +69,9 @@ export function Simon({
   const [lit, setLit] = useState<number | null>(null);
   const [best, setBest] = useState(saved?.best ?? 0);
   const [played, setPlayed] = useState(saved?.played ?? false);
-  const [speed, setSpeed] = useState<SimonSpeed>(normalizeSpeed(saved?.speed));
   const [showModal, setShowModal] = useState(false);
   const [finalRounds, setFinalRounds] = useState(0);
+  const [won, setWon] = useState(false);
   const [wrongPad, setWrongPad] = useState<number | null>(null);
   const [progress, setProgress] = useState(0); // steps tapped in the current round
 
@@ -71,6 +82,9 @@ export function Simon({
   speedRef.current = speed;
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const completedRef = useRef(false);
+  // Timing: the run clock starts when the player begins and stops at game over,
+  // so result.timeMs is reported even though no visible chip is shown.
+  const t0Ref = useRef(0);
 
   const setPhaseBoth = useCallback((p: Phase) => {
     phaseRef.current = p;
@@ -89,11 +103,35 @@ export function Simon({
 
   useEffect(() => () => clearTimers(), [clearTimers]);
 
-  // Persist best + played + speed (JSON-serialisable only).
+  // When the host switches difficulty, the puzzle (sequence + speed + target)
+  // changes underneath us. Cancel any in-flight run and reset to idle so the
+  // player starts the new tier cleanly.
+  const puzzleSig = `${speed}:${target}:${puzzle.sequence.join(",")}`;
+  const lastPuzzleSigRef = useRef(puzzleSig);
   useEffect(() => {
-    onPersistState?.({ best, played, speed });
+    if (lastPuzzleSigRef.current === puzzleSig) return;
+    lastPuzzleSigRef.current = puzzleSig;
+    clearTimers();
+    completedRef.current = false;
+    setPhaseBoth("idle");
+    setRound(0);
+    setProgress(0);
+    setMessage("");
+    setLit(null);
+    setWrongPad(null);
+    setWon(false);
+    setFinalRounds(0);
+    setShowModal(false);
+    stepRef.current = 0;
+    t0Ref.current = 0;
+  }, [puzzleSig, clearTimers, setPhaseBoth]);
+
+  // Persist best + played (JSON-serialisable only). Speed is no longer a player
+  // choice (the host tier owns it), so it is not persisted.
+  useEffect(() => {
+    onPersistState?.({ best, played });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [best, played, speed]);
+  }, [best, played]);
 
   /** Light a pad (with tone) for a duration, then darken it. */
   const flash = useCallback(
@@ -140,24 +178,30 @@ export function Simon({
   );
 
   const endGame = useCallback(
-    (rounds: number) => {
+    (rounds: number, didWin: boolean) => {
       if (completedRef.current) return;
       completedRef.current = true;
+      const timeMs = t0Ref.current > 0 ? Date.now() - t0Ref.current : 0;
       setPhaseBoth("over");
       setPlayed(true);
+      setWon(didWin);
       setFinalRounds(rounds);
       if (rounds > best) setBest(rounds);
-      haptics.win();
+      if (didWin) haptics.win();
+      else haptics.error();
       schedule(() => setShowModal(true), reducedMotion ? 250 : 700);
       onComplete({
-        status: "played",
+        // A successful clear (recalled `target` steps) unlocks the next tier;
+        // a slip before the target is a loss.
+        status: didWin ? "won" : "lost",
         score: scoreForRounds(rounds),
         moves: rounds,
+        timeMs,
         shareText: shareFor(rounds),
-        detail: { rounds, best: Math.max(best, rounds) },
+        detail: { rounds, target, won: didWin, best: Math.max(best, rounds) },
       });
     },
-    [best, onComplete, schedule, reducedMotion, setPhaseBoth],
+    [best, onComplete, schedule, reducedMotion, setPhaseBoth, target],
   );
 
   const start = useCallback(() => {
@@ -165,11 +209,13 @@ export function Simon({
     completedRef.current = false;
     setShowModal(false);
     setWrongPad(null);
+    setWon(false);
     setLit(null);
     setProgress(0);
     setFinalRounds(0);
     setRound(1);
     stepRef.current = 0;
+    t0Ref.current = Date.now();
     schedule(() => playback(1), reducedMotion ? 200 : 450);
   }, [clearTimers, playback, schedule, reducedMotion]);
 
@@ -187,8 +233,9 @@ export function Simon({
         sfx.wrong();
         setPhaseBoth("over");
         setMessage("Wrong — game over");
-        // round - 1 = steps fully recalled before the slip.
-        endGame(round - 1);
+        // round - 1 = steps fully recalled before the slip. A miss before the
+        // target is a loss.
+        endGame(round - 1, false);
         return;
       }
 
@@ -198,15 +245,22 @@ export function Simon({
       setProgress(next);
       const seqLen = sequenceForRound(puzzle, round).length;
       if (next >= seqLen) {
-        // Round cleared — advance.
-        setPhaseBoth("watching");
-        setMessage("✓ Nice");
+        // Round cleared.
         haptics.success();
         sfx.correct();
+        if (round >= target) {
+          // Reached the tier's target length — a win.
+          setMessage("✓ Cleared!");
+          endGame(round, true);
+          return;
+        }
+        // Otherwise advance to the next round.
+        setPhaseBoth("watching");
+        setMessage("✓ Nice");
         nextRound(round);
       }
     },
-    [puzzle, round, flash, endGame, nextRound, setPhaseBoth],
+    [puzzle, round, target, flash, endGame, nextRound, setPhaseBoth],
   );
 
   // Keyboard: 1–4 to tap pads; Enter/Space to start.
@@ -243,8 +297,10 @@ export function Simon({
       : phase === "watching"
         ? `Round ${round}. Watch the sequence.`
         : phase === "input"
-          ? `Round ${round}. Your turn — ${progress} of ${seqLen} repeated.`
-          : `Game over. You recalled ${finalRounds} step${finalRounds === 1 ? "" : "s"}.`;
+          ? `Round ${round} of ${target}. Your turn — ${progress} of ${seqLen} repeated.`
+          : won
+            ? `Cleared! You recalled ${finalRounds} step${finalRounds === 1 ? "" : "s"}.`
+            : `Game over. You recalled ${finalRounds} step${finalRounds === 1 ? "" : "s"}.`;
 
   return (
     <div className="flex w-full flex-col items-center">
@@ -270,6 +326,7 @@ export function Simon({
             style={{ color: "#ffd0f2" }}
           >
             {showRound}
+            <span className="text-[15px] text-[rgba(226,234,255,0.45)]">{`/${target}`}</span>
           </span>
           <span
             className="mt-1 font-mono text-[9.5px] tracking-[0.14em]"
@@ -389,56 +446,14 @@ export function Simon({
         })}
       </div>
 
-      {/* speed selector — changeable only when not mid-run */}
-      <div
-        className={cn("mt-6 flex items-center gap-1.5", !reducedMotion && "animate-rise")}
-        role="radiogroup"
-        aria-label="Playback speed"
-      >
-        {SPEEDS.map((s) => {
-          const active = speed === s;
-          const locked = watching || interactive;
-          return (
-            <button
-              key={s}
-              type="button"
-              role="radio"
-              aria-checked={active}
-              disabled={locked}
-              onClick={() => {
-                if (locked) return;
-                setSpeed(s);
-                haptics.tap();
-              }}
-              className={cn(
-                "min-h-[34px] rounded-pill px-3.5 py-1.5 font-mono text-[11px] tracking-[0.1em] outline-none",
-                "focus-visible:ring-2 focus-visible:ring-offset-2",
-                !reducedMotion && "transition-colors active:scale-95",
-                "disabled:cursor-not-allowed disabled:opacity-50",
-              )}
-              style={{
-                background: active ? `${ACCENT.solid}22` : "rgba(255,255,255,0.04)",
-                border: `1px solid ${active ? `${ACCENT.solid}66` : "rgba(255,255,255,0.10)"}`,
-                color: active ? "#ffd0f2" : "rgba(226,234,255,0.45)",
-                // @ts-expect-error CSS var for focus ring colour
-                "--tw-ring-color": ACCENT.solid,
-                "--tw-ring-offset-color": "#04060f",
-              }}
-            >
-              {SPEED_LABELS[s]}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* start / play again */}
+      {/* start / play again — the host owns the difficulty/speed selector now */}
       <button
         type="button"
         onClick={start}
         disabled={watching || interactive}
         aria-label={played ? "Play again" : "Start sequence"}
         className={cn(
-          "mt-4 min-h-[48px] rounded-xl px-9 py-3.5 font-display text-[15px] font-semibold text-[#04060f] outline-none",
+          "mt-6 min-h-[48px] rounded-xl px-9 py-3.5 font-display text-[15px] font-semibold text-[#04060f] outline-none",
           "focus-visible:ring-2 focus-visible:ring-offset-2",
           !reducedMotion && "transition-transform active:scale-95",
           "disabled:cursor-not-allowed disabled:opacity-40",
@@ -461,8 +476,8 @@ export function Simon({
           style={{ overflowWrap: "break-word" }}
         >
           {played
-            ? "Played today — replay to beat your best."
-            : "Each round adds one step. Tap the pads back in order. One miss ends the run."}
+            ? `Recall ${target} steps to clear this tier — replay to beat your best.`
+            : `Each round adds one step. Tap the pads back in order — recall ${target} steps to win. One miss ends the run.`}
         </p>
       )}
 
@@ -470,9 +485,9 @@ export function Simon({
         open={showModal}
         onClose={() => setShowModal(false)}
         accent={ACCENT}
-        won={finalRounds > 0}
-        eyebrow="SEQUENCE BROKEN"
-        title={titleForRounds(finalRounds)}
+        won={won}
+        eyebrow={won ? "TIER CLEARED" : "SEQUENCE BROKEN"}
+        title={won ? "Tier cleared." : titleForRounds(finalRounds)}
         statValue={String(finalRounds)}
         statLabel="STEPS RECALLED"
         insight={INSIGHT}

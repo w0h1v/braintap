@@ -10,4 +10,5 @@ export default defineGame<StrandsPuzzle, any>({
   getDailyPuzzle,
   Component: Strands,
   validatePuzzle,
+  supportsDifficulty: true,
 });

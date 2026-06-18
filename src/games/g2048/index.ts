@@ -10,4 +10,5 @@ export default defineGame<G2048Puzzle, any>({
   getDailyPuzzle,
   Component: G2048,
   validatePuzzle: validateG2048,
+  supportsDifficulty: true,
 });

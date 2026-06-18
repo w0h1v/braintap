@@ -10,4 +10,5 @@ export default defineGame<WeaverPuzzle, any>({
   getDailyPuzzle,
   Component: Weaver,
   validatePuzzle: validateWeaver,
+  supportsDifficulty: true,
 });

@@ -11,8 +11,8 @@ import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
 import {
-  N,
-  CELLS,
+  cellsFor,
+  sizeOf,
   BLANK,
   blankPos,
   canMove,
@@ -43,10 +43,12 @@ interface SlideState {
   elapsedMs: number;
   won: boolean;
   hintsUsed: number;
+  /** Grid edge length this save belongs to (back-compat: absent on old saves). */
+  size?: number;
 }
 
-const shareLine = (moves: number, ms: number) =>
-  `BrainTap · Tile Slide\nSolved in ${moves} moves · ${formatClock(ms)}\n\n🟦 4×4 fifteen-puzzle\nbraintap.app`;
+const shareLine = (moves: number, ms: number, size: number) =>
+  `BrainTap · Tile Slide\nSolved in ${moves} moves · ${formatClock(ms)}\n\n🟦 ${size}×${size} sliding puzzle\nbraintap.app`;
 
 export function Slide({
   puzzle,
@@ -54,8 +56,21 @@ export function Slide({
   savedState,
   onPersistState,
   reducedMotion = false,
+  hostTimer = false,
 }: GameComponentProps<SlidePuzzle, SlideState>) {
-  const saved = savedState ?? null;
+  // Grid size is driven by the difficulty the host selects, via the puzzle.
+  // Fall back to inferring it from the board for legacy puzzles without a size.
+  const size = puzzle.size ?? sizeOf(puzzle.start);
+  const cells = cellsFor(size);
+  const lastTile = cells - 1; // highest tile value (== cells - 1)
+
+  // Only honour a saved board that matches the active grid size. Older saves (or
+  // saves from a different tier) carry a board of a different length, so we fall
+  // back to the fresh puzzle to avoid mixing sizes or crashing.
+  const saved =
+    savedState && Array.isArray(savedState.board) && savedState.board.length === cells
+      ? savedState
+      : null;
 
   const [board, setBoard] = useState<Board>(() => saved?.board?.slice() ?? puzzle.start.slice());
   const [moves, setMoves] = useState(() => saved?.moves ?? 0);
@@ -73,9 +88,35 @@ export function Slide({
   const hintTimerRef = useRef<number | null>(null);
 
   // Lower bound on remaining moves (used for the share/stat efficiency hint).
-  const optimalLB = useMemo(() => manhattan(puzzle.start), [puzzle.start]);
+  const optimalLB = useMemo(() => manhattan(puzzle.start, size), [puzzle.start, size]);
 
   const clock = useGameClock(!won && moves > 0, saved?.elapsedMs ?? 0);
+
+  // React to a difficulty/size switch from the host: the host namespaces saved
+  // state per tier, but on mount we still reset our refs/state to the new puzzle
+  // when the puzzle identity changes.
+  const puzzleSig = `${size}:${puzzle.start.join(",")}`;
+  const lastSigRef = useRef(puzzleSig);
+  useEffect(() => {
+    if (lastSigRef.current === puzzleSig) return;
+    lastSigRef.current = puzzleSig;
+    const fresh =
+      savedState && Array.isArray(savedState.board) && savedState.board.length === cells
+        ? savedState
+        : null;
+    completedRef.current = false;
+    finalMsRef.current = fresh?.won ? (fresh?.elapsedMs ?? 0) : 0;
+    setBoard(fresh?.board?.slice() ?? puzzle.start.slice());
+    setMoves(fresh?.moves ?? 0);
+    setWon(fresh?.won ?? false);
+    setHintsUsed(fresh?.hintsUsed ?? 0);
+    setHintCell(-1);
+    setShowModal(false);
+    setFocus(0);
+    setSolving(false);
+    clock.reset(fresh?.elapsedMs ?? 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [puzzleSig]);
 
   // Persist resumable state (JSON-serialisable only).
   useEffect(() => {
@@ -85,6 +126,7 @@ export function Slide({
       elapsedMs: won ? finalMsRef.current : clock.ms,
       won,
       hintsUsed,
+      size,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board, moves, won, hintsUsed]);
@@ -125,18 +167,18 @@ export function Slide({
         moves: finalMoves,
         timeMs: finalMs,
         stars,
-        shareText: shareLine(finalMoves, finalMs),
-        detail: { optimalLB, efficiency: Math.round(eff * 100), hintsUsed: usedHints },
+        shareText: shareLine(finalMoves, finalMs, size),
+        detail: { optimalLB, efficiency: Math.round(eff * 100), hintsUsed: usedHints, size },
       });
     },
-    [clock, onComplete, optimalLB, reducedMotion],
+    [clock, onComplete, optimalLB, reducedMotion, size],
   );
 
   const slideAt = useCallback(
     (p: number) => {
       if (won || completedRef.current) return;
       setBoard((cur) => {
-        if (!canMove(cur, p)) {
+        if (!canMove(cur, p, size)) {
           // Invalid tap: a small nudge + soft haptic so the player gets feedback.
           haptics.tap();
           if (!reducedMotion) {
@@ -145,7 +187,7 @@ export function Slide({
           }
           return cur;
         }
-        const next = applyMove(cur, p);
+        const next = applyMove(cur, p, size);
         const startTimer = moves === 0;
         if (startTimer) clock.start();
         setMoves((m) => m + 1);
@@ -161,7 +203,7 @@ export function Slide({
         return next;
       });
     },
-    [won, moves, clock, finish, reducedMotion],
+    [won, moves, clock, finish, reducedMotion, size],
   );
 
   // Hint: compute a sensible next move (pure helper), highlight it, then auto-make
@@ -169,8 +211,8 @@ export function Slide({
   const useHint = useCallback(() => {
     if (won || completedRef.current) return;
     if (hintsUsedRef.current >= MAX_HINTS) return;
-    const cell = nextBestMove(board);
-    if (cell < 0 || !canMove(board, cell)) return;
+    const cell = nextBestMove(board, -1, size);
+    if (cell < 0 || !canMove(board, cell, size)) return;
 
     setHintsUsed((h) => h + 1);
     setHintCell(cell);
@@ -186,34 +228,37 @@ export function Slide({
         slideAt(cell);
       }, 420);
     }
-  }, [won, board, reducedMotion, slideAt]);
+  }, [won, board, reducedMotion, slideAt, size]);
 
   // Keyboard: arrow keys slide the tile from that direction into the blank.
   // Tab focus + Enter/Space activates the focused tile.
-  const moveFocus = useCallback((dr: number, dc: number) => {
-    setFocus((cur) => {
-      let r = Math.floor(cur / N) + dr;
-      let c = (cur % N) + dc;
-      r = Math.max(0, Math.min(N - 1, r));
-      c = Math.max(0, Math.min(N - 1, c));
-      return r * N + c;
-    });
-  }, []);
+  const moveFocus = useCallback(
+    (dr: number, dc: number) => {
+      setFocus((cur) => {
+        let r = Math.floor(cur / size) + dr;
+        let c = (cur % size) + dc;
+        r = Math.max(0, Math.min(size - 1, r));
+        c = Math.max(0, Math.min(size - 1, c));
+        return r * size + c;
+      });
+    },
+    [size],
+  );
 
   const slideFromDirection = useCallback(
     (dir: "up" | "down" | "left" | "right") => {
       // The blank "absorbs" the tile in the given direction relative to it.
       const blankIdx = blankPos(board);
-      const r = Math.floor(blankIdx / N);
-      const c = blankIdx % N;
+      const r = Math.floor(blankIdx / size);
+      const c = blankIdx % size;
       let target = -1;
-      if (dir === "up" && r < N - 1) target = blankIdx + N; // tile below moves up
-      else if (dir === "down" && r > 0) target = blankIdx - N; // tile above moves down
-      else if (dir === "left" && c < N - 1) target = blankIdx + 1; // tile right moves left
+      if (dir === "up" && r < size - 1) target = blankIdx + size; // tile below moves up
+      else if (dir === "down" && r > 0) target = blankIdx - size; // tile above moves down
+      else if (dir === "left" && c < size - 1) target = blankIdx + 1; // tile right moves left
       else if (dir === "right" && c > 0) target = blankIdx - 1; // tile left moves right
       if (target >= 0) slideAt(target);
     },
-    [board, slideAt],
+    [board, slideAt, size],
   );
 
   useEffect(() => {
@@ -247,32 +292,32 @@ export function Slide({
   const alreadyWonOnLoad = useRef(saved?.won ?? false);
   const isComplete = won || isSolved(board);
   const blank = blankPos(board);
-  const movable = useMemo(() => new Set(neighbors(blank)), [blank]);
+  const movable = useMemo(() => new Set(neighbors(blank, size)), [blank, size]);
 
   const replayed = alreadyWonOnLoad.current && !isComplete;
 
   // Tiles in their final position (excluding the blank) — drives the progress bar.
   const placed = useMemo(() => {
     let n = 0;
-    for (let i = 0; i < CELLS - 1; i++) if (board[i] === i + 1) n += 1;
+    for (let i = 0; i < cells - 1; i++) if (board[i] === i + 1) n += 1;
     return n;
-  }, [board]);
+  }, [board, cells]);
 
   const status = isComplete
     ? `Solved in ${moves} moves.`
     : replayed
       ? "Replaying. Beat your previous time."
-      : `${placed} of 15 tiles in place, ${moves} moves.`;
+      : `${placed} of ${lastTile} tiles in place, ${moves} moves.`;
 
   const liveMs = won ? finalMsRef.current : clock.ms;
 
   // Map tile value -> current cell index. Drives absolutely-positioned tiles so
   // a value that changes cell animates via a CSS transform transition.
   const cellOfValue = useMemo(() => {
-    const m: number[] = new Array(CELLS).fill(-1);
-    for (let i = 0; i < CELLS; i++) m[board[i]] = i;
+    const m: number[] = new Array(cells).fill(-1);
+    for (let i = 0; i < cells; i++) m[board[i]] = i;
     return m;
-  }, [board]);
+  }, [board, cells]);
 
   const hintsLeft = MAX_HINTS - hintsUsed;
 
@@ -282,7 +327,7 @@ export function Slide({
         {status}
       </span>
 
-      {/* meta row: moves + progress + timer */}
+      {/* meta row: moves + progress + timer (timer hidden when the host owns it) */}
       <div
         className={cn(
           "flex w-full items-center justify-between font-mono text-[11px] text-ink-mute",
@@ -302,15 +347,21 @@ export function Slide({
           <span id="slide-moves">{moves}</span> {moves === 1 ? "MOVE" : "MOVES"}
         </span>
         <span className="tabular-nums tracking-[0.12em]" style={{ color: ACCENT.soft }}>
-          {placed}/15
+          {placed}/{lastTile}
         </span>
-        <span
-          id="slide-time"
-          className="tabular-nums tracking-[0.1em]"
-          aria-label={`Time ${formatClock(liveMs)}`}
-        >
-          {formatClock(liveMs)}
-        </span>
+        {hostTimer ? (
+          <span className="tabular-nums tracking-[0.12em]" style={{ color: ACCENT.soft }}>
+            {size}×{size}
+          </span>
+        ) : (
+          <span
+            id="slide-time"
+            className="tabular-nums tracking-[0.1em]"
+            aria-label={`Time ${formatClock(liveMs)}`}
+          >
+            {formatClock(liveMs)}
+          </span>
+        )}
       </div>
 
       {/* progress bar */}
@@ -322,7 +373,7 @@ export function Slide({
         <div
           className={cn("h-full rounded-pill", !reducedMotion && "transition-[width] duration-300")}
           style={{
-            width: `${(placed / 15) * 100}%`,
+            width: `${(placed / lastTile) * 100}%`,
             backgroundImage: `linear-gradient(90deg, ${ACCENT.from}, ${ACCENT.to})`,
           }}
         />
@@ -341,7 +392,7 @@ export function Slide({
       <div
         id="slide-board"
         role="grid"
-        aria-label="Tile slide board, 4 by 4"
+        aria-label={`Tile slide board, ${size} by ${size}`}
         className={cn(
           "relative w-full rounded-2xl p-2",
           nudge && !reducedMotion && "animate-shake",
@@ -358,14 +409,14 @@ export function Slide({
         }}
       >
         {/* Inner stage: padding lives on the board; tiles are positioned within
-            this 0..100% stage. Each cell occupies 25% with a small gutter. */}
+            this 0..100% stage. Each cell occupies (100/size)% with a gutter. */}
         <div className="absolute inset-2">
           {/* Blank slot marker (static, sits under the tiles). */}
           {(() => {
             const bi = cellOfValue[BLANK];
-            const br = Math.floor(bi / N);
-            const bc = bi % N;
-            const pct = 100 / N;
+            const br = Math.floor(bi / size);
+            const bc = bi % size;
+            const pct = 100 / size;
             const gut = 4; // px gutter, matches former gap-2 feel
             return (
               <div
@@ -386,12 +437,12 @@ export function Slide({
             );
           })()}
 
-          {Array.from({ length: CELLS - 1 }, (_, k) => {
-            const value = k + 1; // tiles 1..15
+          {Array.from({ length: cells - 1 }, (_, k) => {
+            const value = k + 1; // tiles 1..cells-1
             const i = cellOfValue[value]; // current cell
-            const r = Math.floor(i / N);
-            const c = i % N;
-            const pct = 100 / N;
+            const r = Math.floor(i / size);
+            const c = i % size;
+            const pct = 100 / size;
             const gut = 4;
 
             const canSlide = movable.has(i) && !isComplete;
@@ -435,7 +486,7 @@ export function Slide({
                   top: `calc(${r * pct}% + ${gut / 2}px)`,
                   transitionDuration: reducedMotion ? undefined : `${SLIDE_MS}ms`,
                   transitionTimingFunction: "cubic-bezier(0.22, 0.61, 0.36, 1)",
-                  fontSize: "clamp(20px, 7vw, 28px)",
+                  fontSize: `clamp(16px, ${Math.round(56 / size)}vw, 28px)`,
                   color: "#eafcff",
                   background: isHint
                     ? `linear-gradient(160deg, ${ACCENT.from}, ${ACCENT.to})`
@@ -489,7 +540,8 @@ export function Slide({
         className="mt-3 text-center font-mono text-[11px] leading-relaxed text-ink-faint"
         style={{ maxWidth: BOARD_W }}
       >
-        Tap a tile next to the gap to slide it. Order 1 → 15 with the gap last. Arrow keys work too.
+        Tap a tile next to the gap to slide it. Order 1 → {lastTile} with the gap last. Arrow keys
+        work too.
       </p>
 
       {/* Keyframes for the hint pulse. Defined inline so the game folder is self-contained. */}
@@ -520,7 +572,7 @@ export function Slide({
             )}
           </div>
         }
-        share={shareLine(moves, finalMsRef.current)}
+        share={shareLine(moves, finalMsRef.current, size)}
       />
     </div>
   );

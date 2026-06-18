@@ -11,14 +11,14 @@ import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
 import {
-  COLS,
-  SLOTS,
-  DOMINOES,
   pairStart,
   halves,
   colSums,
   isSolved,
   getHint,
+  configOf,
+  colsFor,
+  slotsFor,
   type Domino,
   type PipsPuzzle,
   type Placement,
@@ -79,10 +79,10 @@ interface PipsState {
   future?: BoardSnapshot[];
 }
 
-function emptyState(): PipsState {
+function emptyState(slotCount: number, dominoCount: number): PipsState {
   return {
-    slots: [null, null, null, null],
-    flips: [false, false, false, false],
+    slots: new Array(slotCount).fill(null),
+    flips: new Array(dominoCount).fill(false),
     locked: [],
     hintsUsed: 0,
     elapsedMs: 0,
@@ -183,10 +183,34 @@ export function Pips({
   savedState,
   onPersistState,
   reducedMotion,
+  hostTimer,
 }: GameComponentProps<PipsPuzzle, PipsState>) {
-  const [state, setState] = useState<PipsState>(() =>
-    savedState ? { ...emptyState(), ...savedState } : emptyState(),
-  );
+  // Board shape is read from the puzzle (difficulty-driven). Falls back to the
+  // legacy 2×2 board for older puzzles that predate the `config` field.
+  const cfg = useMemo(() => configOf(puzzle), [puzzle]);
+  const COLS = colsFor(cfg);
+  const SLOTS = slotsFor(cfg);
+  const DOMINOES = SLOTS; // one domino per slot
+  const PAIRS = cfg.pairs;
+
+  const [state, setState] = useState<PipsState>(() => {
+    const base = emptyState(SLOTS, DOMINOES);
+    if (!savedState) return base;
+    // Guard against older / mismatched saved shapes (e.g. a save from a
+    // different board size): only adopt arrays that fit this board.
+    const slotsOk =
+      Array.isArray(savedState.slots) && savedState.slots.length === SLOTS;
+    const flipsOk =
+      Array.isArray(savedState.flips) && savedState.flips.length === DOMINOES;
+    if (!slotsOk || !flipsOk) {
+      // Keep only the safe, size-independent fields from the old save.
+      return {
+        ...base,
+        elapsedMs: typeof savedState.elapsedMs === "number" ? savedState.elapsedMs : 0,
+      };
+    }
+    return { ...base, ...savedState };
+  });
   const [selected, setSelected] = useState<number | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [pulse, setPulse] = useState(false);
@@ -202,12 +226,15 @@ export function Pips({
   const clock = useGameClock(!won, savedState?.elapsedMs ?? 0);
 
   const placement: Placement = useMemo(() => ({ slots, flips }), [slots, flips]);
-  const sums = useMemo(() => colSums(puzzle.bank, placement), [puzzle.bank, placement]);
+  const sums = useMemo(
+    () => colSums(puzzle.bank, placement, cfg),
+    [puzzle.bank, placement, cfg],
+  );
 
   // Dominoes not yet placed (tray) preserve their tray order by id.
   const trayIds = useMemo(
     () => Array.from({ length: DOMINOES }, (_, id) => id).filter((id) => !slots.includes(id)),
-    [slots],
+    [slots, DOMINOES],
   );
 
   // How many columns currently hit their target — drives the status line.
@@ -226,7 +253,7 @@ export function Pips({
       haptics.success();
     }
     prevBalanced.current = balancedCount;
-  }, [balancedCount, won]);
+  }, [balancedCount, won, COLS]);
 
   // Persist resumable state (including undo/redo history).
   useEffect(() => {
@@ -271,7 +298,7 @@ export function Pips({
         detail: { difficulty: puzzle.difficulty, hintsUsed: finalHints },
       });
     },
-    [clock, onComplete, puzzle.difficulty, reducedMotion],
+    [clock, onComplete, puzzle.difficulty, reducedMotion, DOMINOES],
   );
 
   // Detect a win after each board change.
@@ -377,7 +404,7 @@ export function Pips({
       haptics.success();
       applyAction({ slots: nextSlots, moves: state.moves + 1 });
     },
-    [won, selected, state, applyAction],
+    [won, selected, state, applyAction, SLOTS],
   );
 
   const flipDomino = useCallback(
@@ -426,7 +453,11 @@ export function Pips({
     // the hint count (and its score penalty) is preserved too. Reset is itself
     // undoable: it records the pre-reset board and clears the redo stack.
     setState((s) => {
-      const next = { ...emptyState(), elapsedMs: s.elapsedMs, hintsUsed: s.hintsUsed };
+      const next = {
+        ...emptyState(SLOTS, DOMINOES),
+        elapsedMs: s.elapsedMs,
+        hintsUsed: s.hintsUsed,
+      };
       for (const id of s.locked) {
         const { slot, flip } = puzzle.solution[id];
         next.slots[slot] = id;
@@ -438,7 +469,7 @@ export function Pips({
       next.future = [];
       return next;
     });
-  }, [won, puzzle.solution]);
+  }, [won, puzzle.solution, DOMINOES, SLOTS]);
 
   const useHint = useCallback(() => {
     if (won || state.hintsUsed >= MAX_HINTS) return;
@@ -468,13 +499,30 @@ export function Pips({
       hintsUsed: state.hintsUsed + 1,
       moves: state.moves + 1,
     });
-  }, [won, state, puzzle, applyAction, reducedMotion]);
+  }, [won, state, puzzle, applyAction, reducedMotion, SLOTS]);
 
   // Move keyboard focus to a slot button (used by arrow-key navigation).
-  const focusSlot = useCallback((slot: number) => {
-    const el = slotRefs.current[((slot % SLOTS) + SLOTS) % SLOTS];
-    el?.focus();
-  }, []);
+  const focusSlot = useCallback(
+    (slot: number) => {
+      const el = slotRefs.current[((slot % SLOTS) + SLOTS) % SLOTS];
+      el?.focus();
+    },
+    [SLOTS],
+  );
+
+  // Step focus by one slot in a grid direction (dr/dc in row/pair units),
+  // wrapping within the rows×pairs slot grid.
+  const stepFocus = useCallback(
+    (fromIdx: number, dr: number, dc: number) => {
+      const rows = SLOTS / PAIRS;
+      const row = Math.floor(fromIdx / PAIRS);
+      const pair = fromIdx % PAIRS;
+      const nr = ((row + dr) % rows + rows) % rows;
+      const nc = ((pair + dc) % PAIRS + PAIRS) % PAIRS;
+      focusSlot(nr * PAIRS + nc);
+    },
+    [SLOTS, PAIRS, focusSlot],
+  );
 
   // Global keyboard affordances: Escape clears selection, Ctrl/Cmd+Z undoes,
   // Ctrl/Cmd+Shift+Z (or Ctrl+Y) redoes, and arrow keys move between slots when
@@ -504,14 +552,16 @@ export function Pips({
         const idx = slotRefs.current.findIndex((el) => el && el === active);
         if (idx < 0) return;
         e.preventDefault();
-        // 2x2 grid: left/right flip the column bit, up/down the row bit.
-        if (e.key === "ArrowLeft" || e.key === "ArrowRight") focusSlot(idx ^ 1);
-        else focusSlot(idx ^ 2);
+        // rows×pairs grid: left/right move between pairs, up/down between rows.
+        if (e.key === "ArrowLeft") stepFocus(idx, 0, -1);
+        else if (e.key === "ArrowRight") stepFocus(idx, 0, 1);
+        else if (e.key === "ArrowUp") stepFocus(idx, -1, 0);
+        else if (e.key === "ArrowDown") stepFocus(idx, 1, 0);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, focusSlot]);
+  }, [undo, redo, stepFocus]);
 
   const allPlaced = trayIds.length === 0;
   // No hint can do anything once every domino already matches the solution.
@@ -533,21 +583,22 @@ export function Pips({
 
   return (
     <div className="mx-auto flex w-full max-w-[440px] flex-col items-center px-1">
-      {/* Header: difficulty · progress · timer */}
-      <div className="mb-3 flex w-full items-center justify-between font-mono text-[11px] text-ink-mute">
-        <span
-          className="rounded-pill px-2.5 py-1 font-semibold tracking-[0.12em]"
-          style={{ color: ACCENT.soft, background: `${ACCENT.solid}1a` }}
-        >
-          {puzzle.difficulty.toUpperCase()}
-        </span>
-        <span
-          className="font-semibold tabular-nums tracking-[0.06em] text-ink-soft"
-          aria-label={`Time elapsed ${formatClock(clock.ms)}`}
-        >
-          {formatClock(clock.ms)}
-        </span>
-      </div>
+      {/*
+        Header timer. Hidden when the host renders its own unified timer chip
+        (hostTimer) — all timing logic above is preserved so result.timeMs is
+        still reported. The difficulty is shown by the host's tier selector, so
+        no in-component difficulty/size selector is rendered here.
+      */}
+      {!hostTimer && (
+        <div className="mb-3 flex w-full items-center justify-end font-mono text-[11px] text-ink-mute">
+          <span
+            className="font-semibold tabular-nums tracking-[0.06em] text-ink-soft"
+            aria-label={`Time elapsed ${formatClock(clock.ms)}`}
+          >
+            {formatClock(clock.ms)}
+          </span>
+        </div>
+      )}
 
       {/* Column targets */}
       <div className="mb-1.5 flex w-full items-center justify-between">
@@ -558,7 +609,12 @@ export function Pips({
           {balancedCount}/{COLS} balanced
         </span>
       </div>
-      <div className="grid w-full grid-cols-4 gap-2" role="list" aria-label="Column targets">
+      <div
+        className="grid w-full gap-2"
+        style={{ gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))` }}
+        role="list"
+        aria-label="Column targets"
+      >
         {Array.from({ length: COLS }, (_, c) => {
           const sum = sums[c];
           const target = puzzle.targets[c];
@@ -607,10 +663,13 @@ export function Pips({
       <div className="mt-5 mb-1.5 w-full font-mono text-[10px] tracking-[0.16em] text-ink-faint">
         SLOTS · TAP TO PLACE, ↻ TO FLIP · ⬄ KEYS TO MOVE
       </div>
-      <div className="grid w-full grid-cols-2 gap-2.5">
+      <div
+        className="grid w-full gap-2.5"
+        style={{ gridTemplateColumns: `repeat(${PAIRS}, minmax(0, 1fr))` }}
+      >
         {Array.from({ length: SLOTS }, (_, slot) => {
           const id = slots[slot];
-          const ps = pairStart(slot);
+          const ps = pairStart(slot, PAIRS);
           if (id == null) {
             const armed = selected != null && !won;
             return (

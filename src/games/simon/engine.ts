@@ -9,6 +9,7 @@
  */
 
 import type { Rng } from "@/lib/rng";
+import type { Difficulty } from "@/lib/types";
 
 /** Number of pads / distinct colours & tones. */
 export const PADS = 4;
@@ -42,6 +43,23 @@ export const PAD_TONES: ReadonlyArray<number> = [329.63, 415.3, 493.88, 587.33] 
 export interface SimonPuzzle {
   /** The master sequence of pad indices (0–3), length MAX_ROUNDS. */
   sequence: number[];
+  /**
+   * The difficulty tier this puzzle was generated for. Optional so older saved
+   * shapes / legacy callers that ignore tiers still type-check.
+   */
+  difficulty?: Difficulty;
+  /**
+   * Playback speed tier for this puzzle (slow/normal/fast), derived from the
+   * difficulty. Optional for backward-compat; the component falls back to
+   * "normal" when absent.
+   */
+  speed?: SimonSpeed;
+  /**
+   * The number of steps the player must recall to WIN (clear the tier).
+   * Reaching round `target` and echoing it correctly is a win. Optional for
+   * backward-compat; absent ⇒ legacy endless mode (no win threshold).
+   */
+  target?: number;
 }
 
 /**
@@ -89,6 +107,32 @@ export const SPEED_FACTORS: Record<SimonSpeed, number> = {
 /** Normalise an arbitrary value to a valid speed, defaulting to "normal". */
 export function normalizeSpeed(value: unknown): SimonSpeed {
   return value === "slow" || value === "fast" ? value : "normal";
+}
+
+/**
+ * Tier parameters for the difficulty-tier framework. The host owns difficulty
+ * now; each tier maps to BOTH a playback speed and a target sequence length the
+ * player must recall to WIN. Harder tiers play faster AND ask for a longer
+ * sequence, so the two knobs escalate together:
+ *
+ *   easy   → slow   playback, recall  4 steps to win
+ *   medium → normal playback, recall  6 steps to win
+ *   hard   → fast   playback, recall  9 steps to win
+ */
+export interface SimonTierParams {
+  speed: SimonSpeed;
+  target: number;
+}
+
+export const TIER_PARAMS: Record<Difficulty, SimonTierParams> = {
+  easy: { speed: "slow", target: 4 },
+  medium: { speed: "normal", target: 6 },
+  hard: { speed: "fast", target: 9 },
+};
+
+/** Resolve the tier parameters (speed + win target) for a difficulty. */
+export function tierParams(difficulty: Difficulty): SimonTierParams {
+  return TIER_PARAMS[difficulty];
 }
 
 /**

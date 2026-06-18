@@ -10,4 +10,5 @@ export default defineGame<SimonPuzzle, any>({
   getDailyPuzzle,
   Component: Simon,
   validatePuzzle: validateSimon,
+  supportsDifficulty: true,
 });

@@ -10,4 +10,5 @@ export default defineGame<BrainlePuzzle, any>({
   getDailyPuzzle,
   Component: Brainle,
   validatePuzzle: validateBrainle,
+  supportsDifficulty: true,
 });

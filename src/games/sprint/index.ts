@@ -10,4 +10,5 @@ export default defineGame<SprintPuzzle, any>({
   getDailyPuzzle,
   Component: Sprint,
   validatePuzzle: validateSprint,
+  supportsDifficulty: true,
 });
