@@ -317,7 +317,7 @@ export function Vault({
               aria-label={`Row ${r + 1} column ${c + 1}${
                 state === "good" ? ", selected" : ""
               }`}
-              aria-pressed={state === "good"}
+              aria-selected={state === "good"}
               disabled={!interactive}
               onClick={() => pick(i)}
               className={cn(

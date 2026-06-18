@@ -609,7 +609,7 @@ function Row({
             type="button"
             role="gridcell"
             aria-label={`Row ${r + 1} column ${c + 1}, ${label}`}
-            aria-pressed={filled}
+            aria-selected={filled}
             tabIndex={sel ? 0 : -1}
             disabled={won && !filled}
             onClick={() => onActivate(i)}

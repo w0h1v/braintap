@@ -547,7 +547,7 @@ export function Connections({
                   }}
                   type="button"
                   role="gridcell"
-                  aria-pressed={isSel}
+                  aria-selected={isSel}
                   aria-label={`${word}${isSel ? `, selected ${selIndex + 1} of ${GROUP_SIZE}` : ""}`}
                   disabled={gameOver}
                   // Roving tabindex: only the cursor tile is in the tab order.
