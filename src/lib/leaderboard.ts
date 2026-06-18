@@ -80,8 +80,11 @@ function localResult(
 ): { score: number; timeMs?: number } | undefined {
   try {
     const st = useProgress.getState();
-    const res =
-      st.tierResults[dateISO]?.[gameId]?.[difficulty] ?? st.results[dateISO]?.[gameId];
+    // For tiered games use ONLY the selected tier's result (no cross-tier
+    // bleed). Fall back to the representative result only for legacy games that
+    // never recorded any per-tier result that day.
+    const tiers = st.tierResults[dateISO]?.[gameId];
+    const res = tiers?.[difficulty] ?? (tiers ? undefined : st.results[dateISO]?.[gameId]);
     if (!res) return undefined;
     return { score: res.score, timeMs: res.timeMs };
   } catch {
@@ -125,7 +128,7 @@ export async function getDailyLeaderboard(
     }
   }
 
-  return synthBoard(gameId, dateISO, topN, you);
+  return synthBoard(gameId, dateISO, topN, you, difficulty);
 }
 
 /**

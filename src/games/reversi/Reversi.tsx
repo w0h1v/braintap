@@ -190,7 +190,9 @@ export function Reversi({
       completedRef.current = true;
       const { you, ai } = score(finalBoard);
       const result = outcomeFor(finalBoard);
-      const status = result === "won" ? "won" : result === "tie" ? "played" : "lost";
+      // A tie counts as clearing the tier (you didn't lose) so progression
+      // isn't blocked; only an outright loss locks the next tier.
+      const status = result === "lost" ? "lost" : "won";
 
       // Score 0..100 from disc differential, centred at 50 for a tie.
       const diff = you - ai; // -64..64

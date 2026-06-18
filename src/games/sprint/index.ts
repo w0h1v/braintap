@@ -11,4 +11,7 @@ export default defineGame<SprintPuzzle, any>({
   Component: Sprint,
   validatePuzzle: validateSprint,
   supportsDifficulty: true,
+  // Sprint is a fixed-duration game with its own countdown; a host count-up
+  // timer would mislead, so suppress it.
+  hostTimer: false,
 });

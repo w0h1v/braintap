@@ -361,9 +361,9 @@ export function Sudoku({
 
   return (
     <div className="flex w-full flex-col items-center">
-      <a id="bt-sudoku-status" className="sr-only" aria-live="polite">
+      <p id="bt-sudoku-status" className="sr-only" role="status" aria-live="polite">
         {status}
-      </a>
+      </p>
 
       {/* meta row: difficulty + progress + timer */}
       <div
@@ -468,6 +468,9 @@ export function Sudoku({
                 "relative flex touch-manipulation select-none items-center justify-center font-display outline-none",
                 !reducedMotion && "transition-[background-color,transform,color] duration-150",
                 conflict && !reducedMotion && "animate-pulse2",
+            // Persistent non-colour cue (a ring) so conflicts are perceivable
+            // without relying on the red tint or the (motion-gated) pulse.
+            conflict && "ring-2 ring-inset ring-[#ff6b9d]",
                 isSel && !reducedMotion && "z-10 scale-[1.04]",
               )}
               style={{

@@ -28,5 +28,13 @@ export default function PlayPage({
   searchParams: { date?: string };
 }) {
   if (!VALID.has(params.game)) notFound();
-  return <GameHost gameId={params.game as GameId} dateParam={searchParams.date} />;
+  // Key by game + date so soft navigation between dates (archive browsing)
+  // fully remounts the host — resetting tier selection + timer for the new day.
+  return (
+    <GameHost
+      key={`${params.game}:${searchParams.date ?? "today"}`}
+      gameId={params.game as GameId}
+      dateParam={searchParams.date}
+    />
+  );
 }

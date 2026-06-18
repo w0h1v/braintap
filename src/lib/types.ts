@@ -129,6 +129,12 @@ export interface GameModule<P = unknown, S = unknown> {
    * daily puzzle (legacy behaviour).
    */
   supportsDifficulty?: boolean;
+  /**
+   * Whether the host shows its unified count-up timer for this game. Defaults to
+   * true for tiered games. Set false for fixed-duration / score games that show
+   * their own (e.g. a countdown), where a count-up timer would mislead.
+   */
+  hostTimer?: boolean;
 }
 
 /**

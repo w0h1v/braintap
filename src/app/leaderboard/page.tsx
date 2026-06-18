@@ -230,7 +230,25 @@ export default function LeaderboardPage() {
           </div>
 
           {/* difficulty tier tabs */}
-          <div role="tablist" aria-label="Difficulty" className="mt-4 flex gap-1.5">
+          <div
+            role="tablist"
+            aria-label="Difficulty"
+            className="mt-4 flex gap-1.5"
+            onKeyDown={(e) => {
+              const i = DIFFICULTIES.indexOf(tier);
+              let n: typeof tier | null = null;
+              if (e.key === "ArrowRight" || e.key === "ArrowDown")
+                n = DIFFICULTIES[(i + 1) % DIFFICULTIES.length];
+              else if (e.key === "ArrowLeft" || e.key === "ArrowUp")
+                n = DIFFICULTIES[(i - 1 + DIFFICULTIES.length) % DIFFICULTIES.length];
+              else if (e.key === "Home") n = DIFFICULTIES[0];
+              else if (e.key === "End") n = DIFFICULTIES[DIFFICULTIES.length - 1];
+              if (n) {
+                e.preventDefault();
+                setTier(n);
+              }
+            }}
+          >
             {DIFFICULTIES.map((d) => {
               const dm = DIFFICULTY_META[d];
               const active = d === tier;
@@ -239,12 +257,15 @@ export default function LeaderboardPage() {
                   key={d}
                   type="button"
                   role="tab"
+                  id={`lb-tab-${d}`}
+                  aria-controls="lb-panel"
                   aria-selected={active}
+                  tabIndex={active ? 0 : -1}
                   onClick={() => setTier(d)}
                   className={cn(
                     "flex-1 rounded-pill border px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.08em] transition-colors",
                     active
-                      ? "text-[#04060f]"
+                      ? "font-semibold text-[#04060f] underline decoration-2 underline-offset-2"
                       : "border-line bg-white/[0.02] text-ink-soft hover:text-ink",
                   )}
                   style={
@@ -257,7 +278,12 @@ export default function LeaderboardPage() {
             })}
           </div>
 
-          <div className="mt-5 flex flex-col gap-1.5">
+          <div
+            id="lb-panel"
+            role="tabpanel"
+            aria-labelledby={`lb-tab-${tier}`}
+            className="mt-5 flex flex-col gap-1.5"
+          >
             {loading ? (
               Array.from({ length: 8 }).map((_, i) => (
                 <div

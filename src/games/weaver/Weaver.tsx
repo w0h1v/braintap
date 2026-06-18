@@ -14,6 +14,7 @@ import {
   getHint,
   goalForWords,
   hiveLetters,
+  isPangram,
   rankFor,
   scoreOf,
   type SubmitError,
@@ -155,8 +156,8 @@ export function Weaver({
     goal > 0 ? Math.min(100, Math.round((found.length / goal) * 100)) : 0;
   const goalMet = found.length >= goal;
   const pangramCount = useMemo(
-    () => found.filter((w) => w.length === 7 && evaluateWord(w, puzzle, new Set()).ok).length,
-    [found, puzzle],
+    () => found.filter((w) => isPangram(w, hive)).length,
+    [found, hive],
   );
 
   // Persist resumable state (JSON-serialisable only).
@@ -583,8 +584,7 @@ export function Weaver({
             className="flex max-h-[168px] flex-wrap content-start gap-[7px] overflow-y-auto pr-1"
           >
             {foundDisplay.map((w) => {
-              const pan = evaluateWord(w, puzzle, new Set<string>());
-              const isPan = pan.ok && pan.pangram;
+              const isPan = isPangram(w, hive);
               return (
                 <span
                   key={w}

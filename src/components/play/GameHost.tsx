@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -36,10 +37,57 @@ type HostComponent = ComponentType<{
   hostTimer?: boolean;
 }>;
 
+/**
+ * Self-contained timer chip. Owns its own clock so the 4Hz tick re-renders ONLY
+ * this chip, never the game subtree. Resets to `initialMs` (the tier's banked
+ * elapsed) whenever `resetKey` changes; runs while `run` is true; shows the
+ * frozen best time once solved. Reports the live ms up via `onMs` (a ref write,
+ * so it never re-renders the parent).
+ */
+const TierTimer = memo(function TierTimer({
+  resetKey,
+  initialMs,
+  run,
+  frozenMs,
+  onMs,
+}: {
+  resetKey: string;
+  initialMs: number;
+  run: boolean;
+  frozenMs: number | null;
+  onMs: (ms: number) => void;
+}) {
+  const clock = useGameClock(false, initialMs);
+  useEffect(() => {
+    clock.reset(initialMs);
+    if (run) clock.start();
+    else clock.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetKey, run]);
+  useEffect(() => {
+    onMs(clock.ms);
+  }, [clock.ms, onMs]);
+
+  const shown = frozenMs != null ? frozenMs : clock.ms;
+  return (
+    <div
+      className="flex items-center gap-2 self-start rounded-pill border border-line bg-white/[0.02] px-3.5 py-1.5 font-mono text-[12px] tabular-nums text-ink-soft sm:self-auto"
+      aria-label={frozenMs != null ? "Best time" : "Elapsed time"}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <circle cx="12" cy="13" r="8" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M12 9v4l2.5 2M9 2h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+      {frozenMs != null ? `Best ${fmtMs(shown)}` : fmtMs(shown)}
+    </div>
+  );
+});
+
 export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: string }) {
   const game = getGame(gameId)!;
   const meta = game.meta;
   const supportsDiff = Boolean(game.supportsDifficulty);
+  const showHostTimer = supportsDiff && game.hostTimer !== false;
   const today = todayISO();
   const dateISO = dateParam || today;
   const isArchive = dateISO !== today;
@@ -49,7 +97,6 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
   const saveGameState = useProgress((s) => s.saveGameState);
   const getGameState = useProgress((s) => s.getGameState);
   const zen = useProgress((s) => s.settings.zen);
-  // Reactive per-tier + representative results for this game/day.
   const tierMap = useProgress((s) => s.tierResults[dateISO]?.[gameId]);
   const repResult = useProgress((s) => s.results[dateISO]?.[gameId]);
 
@@ -67,7 +114,6 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
     [tierMap],
   );
 
-  // Active tier. Initialise once hydrated to the lowest unlocked-but-unsolved tier.
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   const initRef = useRef(false);
   useEffect(() => {
@@ -96,31 +142,33 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
   const tierResult = supportsDiff ? tierMap?.[difficulty] : repResult;
   const tierWon = tierResult?.status === "won";
 
-  // Unified timer for difficulty games: reset + run when the active tier changes
-  // (unless it's already solved, in which case we show the saved best time).
-  const clock = useGameClock(false);
-  useEffect(() => {
-    if (!supportsDiff) return;
-    clock.reset(0);
-    if (tierWon) clock.stop();
-    else clock.start();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supportsDiff, difficulty]);
+  // --- unified timer: per-tier elapsed bank + live ms via a ref (no re-render) ---
+  const hostMsRef = useRef(0);
+  const bankRef = useRef<Partial<Record<Difficulty, number>>>({});
+  const prevDiffRef = useRef<Difficulty>(difficulty);
+  // Bank the leaving tier's elapsed during render (before the child timer
+  // resets), so returning to a tier resumes its accumulated time.
+  if (difficulty !== prevDiffRef.current) {
+    bankRef.current[prevDiffRef.current] = hostMsRef.current;
+    prevDiffRef.current = difficulty;
+  }
+  const initialMs = tierWon ? 0 : bankRef.current[difficulty] ?? 0;
+  const onMs = useCallback((ms: number) => {
+    hostMsRef.current = ms;
+  }, []);
 
   const onComplete = useCallback(
     (result: GameResult) => {
-      clock.stop();
-      // Prefer the game's own measured time (sudoku/schulte); fall back to the
-      // host clock for games that don't track time themselves (e.g. connections).
+      // Prefer the game's own measured time; fall back to the host clock for
+      // games that don't track time themselves (only when the host timer runs).
+      const fallback = showHostTimer ? hostMsRef.current : undefined;
       const finalResult: GameResult = supportsDiff
-        ? { ...result, timeMs: result.timeMs ?? clock.ms }
+        ? { ...result, timeMs: result.timeMs ?? fallback }
         : result;
       recordResult(gameId, dateISO, finalResult, !isArchive, activeDiff);
-      // Push to the cloud so signed-in players land on the (per-tier)
-      // leaderboard immediately. Guarded no-op for guests / offline.
       void syncProgress();
     },
-    [recordResult, gameId, dateISO, isArchive, activeDiff, supportsDiff, clock],
+    [recordResult, gameId, dateISO, isArchive, activeDiff, supportsDiff, showHostTimer],
   );
 
   const onPersistState = useCallback(
@@ -128,11 +176,31 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
     [saveGameState, gameId, dateISO, activeDiff],
   );
 
-  const Component = game.Component as HostComponent;
+  // Memoise the game so timer/host re-renders never reconcile the board subtree.
+  const GameComponent = useMemo(
+    () => memo(game.Component as HostComponent),
+    [game.Component],
+  );
   const componentKey = `${gameId}:${dateISO}:${activeDiff ?? "solo"}`;
 
-  const elapsed = tierWon ? tierResult?.timeMs ?? 0 : clock.ms;
   const nextTier = activeDiff ? nextDifficulty(activeDiff) : null;
+
+  // Keyboard nav across the (unlocked) tier tabs — automatic activation.
+  const onTabsKeyDown = (e: React.KeyboardEvent) => {
+    const unlocked = DIFFICULTIES.filter((d) => isUnlocked(d));
+    if (unlocked.length <= 1) return;
+    const i = unlocked.indexOf(difficulty);
+    let next: Difficulty | null = null;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") next = unlocked[(i + 1) % unlocked.length];
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp")
+      next = unlocked[(i - 1 + unlocked.length) % unlocked.length];
+    else if (e.key === "Home") next = unlocked[0];
+    else if (e.key === "End") next = unlocked[unlocked.length - 1];
+    if (next) {
+      e.preventDefault();
+      setDifficulty(next);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-shell px-4 pb-16 pt-24 sm:px-6">
@@ -171,6 +239,7 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
           <div
             role="tablist"
             aria-label="Difficulty"
+            onKeyDown={onTabsKeyDown}
             className="flex gap-1 rounded-pill border border-line bg-white/[0.02] p-1"
           >
             {DIFFICULTIES.map((d) => {
@@ -181,32 +250,34 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
               const best = tierMap?.[d]?.timeMs;
               const priorLabel =
                 dm.order > 0 ? DIFFICULTY_META[DIFFICULTIES[dm.order - 1]].label : "";
+              const label = won
+                ? `${dm.label}, solved`
+                : unlocked
+                  ? dm.label
+                  : `${dm.label}, locked — solve ${priorLabel} to unlock`;
               return (
                 <button
                   key={d}
                   type="button"
                   role="tab"
+                  id={`tier-tab-${d}`}
+                  aria-controls="tier-panel"
                   aria-selected={active}
-                  disabled={!unlocked}
+                  aria-disabled={!unlocked || undefined}
+                  aria-label={label}
+                  tabIndex={active ? 0 : -1}
                   onClick={() => unlocked && setDifficulty(d)}
-                  title={unlocked ? dm.label : `Solve ${priorLabel} to unlock`}
                   className={cn(
                     "flex items-center gap-1.5 rounded-pill px-3.5 py-1.5 font-mono text-[11px] tracking-[0.06em] transition-colors",
                     active
-                      ? "text-[#04060f]"
+                      ? "font-semibold text-[#04060f] underline decoration-2 underline-offset-2"
                       : unlocked
                         ? "text-ink-soft hover:text-ink"
                         : "cursor-not-allowed text-ink-faint opacity-60",
                   )}
-                  style={
-                    active
-                      ? { backgroundColor: dm.color }
-                      : undefined
-                  }
+                  style={active ? { backgroundColor: dm.color } : undefined}
                 >
-                  <span aria-hidden>
-                    {won ? "✓" : !unlocked ? "🔒" : "○"}
-                  </span>
+                  <span aria-hidden>{won ? "✓" : !unlocked ? "🔒" : "○"}</span>
                   <span className="uppercase">{dm.label}</span>
                   {best ? (
                     <span className={cn("tabular-nums", active ? "opacity-70" : "text-ink-faint")}>
@@ -218,22 +289,25 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
             })}
           </div>
 
-          {/* timer chip */}
-          <div
-            className="flex items-center gap-2 self-start rounded-pill border border-line bg-white/[0.02] px-3.5 py-1.5 font-mono text-[12px] tabular-nums text-ink-soft sm:self-auto"
-            aria-label={tierWon ? "Best time" : "Elapsed time"}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <circle cx="12" cy="13" r="8" stroke="currentColor" strokeWidth="1.6" />
-              <path d="M12 9v4l2.5 2M9 2h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-            {tierWon ? `Best ${fmtMs(elapsed)}` : fmtMs(elapsed)}
-          </div>
+          {showHostTimer && (
+            <TierTimer
+              resetKey={`${componentKey}:${tierWon ? "won" : "live"}`}
+              initialMs={initialMs}
+              run={!tierWon}
+              frozenMs={tierWon ? tierResult?.timeMs ?? 0 : null}
+              onMs={onMs}
+            />
+          )}
         </div>
       )}
 
-      <div className="rounded-3xl border border-line bg-gradient-to-b from-[rgba(11,15,31,0.65)] to-[rgba(6,8,18,0.6)] p-4 sm:p-6">
-        <Component
+      <div
+        id={supportsDiff ? "tier-panel" : undefined}
+        role={supportsDiff ? "tabpanel" : undefined}
+        aria-labelledby={supportsDiff ? `tier-tab-${difficulty}` : undefined}
+        className="rounded-3xl border border-line bg-gradient-to-b from-[rgba(11,15,31,0.65)] to-[rgba(6,8,18,0.6)] p-4 sm:p-6"
+      >
+        <GameComponent
           key={componentKey}
           puzzle={puzzle}
           dateISO={dateISO}
@@ -243,7 +317,7 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
           reducedMotion={Boolean(reducedMotion)}
           isArchive={isArchive}
           difficulty={activeDiff}
-          hostTimer={supportsDiff}
+          hostTimer={showHostTimer}
         />
       </div>
 
