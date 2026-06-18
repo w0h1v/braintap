@@ -14,6 +14,7 @@ import { GAME_METAS } from "@/games/_meta";
 import { StatBox, Pill, Card } from "@/components/ui/Card";
 import { GameIcon } from "@/components/GameIcon";
 import { todayISO } from "@/lib/daily";
+import { GuestCta } from "@/components/GuestCta";
 import { cn } from "@/lib/cn";
 
 /** Headline tier for the overall brain score. */
@@ -343,8 +344,11 @@ export default function StatsPage() {
         </div>
       </div>
 
+      {/* optional-account invite (guests only) */}
+      <GuestCta variant="stats" className="mt-8 animate-rise" />
+
       {/* stat strip */}
-      <div className="mt-10 grid animate-rise grid-cols-2 gap-3.5 md:grid-cols-4">
+      <div className="mt-8 grid animate-rise grid-cols-2 gap-3.5 md:grid-cols-4">
         <StatBox value={String(overall)} sub="/100" label="BRAIN SCORE" color="#00e5ff" />
         <StatBox
           value={top && top.value > 0 ? top.label : "—"}

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GameId, GameResult } from "@/lib/types";
 import { getGame } from "@/lib/games";
 import { useProgress } from "@/lib/progress";
+import { syncProgress } from "@/lib/sync";
 import { todayISO, dateLabel } from "@/lib/daily";
 import { GameIcon } from "@/components/GameIcon";
 import { cn } from "@/lib/cn";
@@ -44,6 +45,9 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
     (result: GameResult) => {
       recordResult(gameId, dateISO, result, !isArchive);
       setDone(result);
+      // Push to the cloud so signed-in players land on the leaderboard right
+      // away. Guarded no-op for guests / offline, and never throws.
+      void syncProgress();
     },
     [recordResult, gameId, dateISO, isArchive],
   );

@@ -87,10 +87,23 @@ export function Nav() {
 
           <Link
             href={user ? "/profile" : "/auth/login"}
-            aria-label={user ? "Your profile" : "Sign in"}
+            aria-label={enabled && user ? "Your profile" : "Sign in (optional)"}
+            title={enabled && user ? "Your profile" : "Sign in — optional, for cross-device sync & leaderboard"}
             className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-cyan to-magenta font-display text-[13px] font-semibold text-[#04060f]"
           >
-            {enabled && user ? avatarLetter : "?"}
+            {enabled && user ? (
+              avatarLetter
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M5 19v-1a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v1"
+                  stroke="#04060f"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+                <circle cx="12" cy="8" r="3.4" stroke="#04060f" strokeWidth="1.8" />
+              </svg>
+            )}
           </Link>
 
           <button

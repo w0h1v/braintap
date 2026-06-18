@@ -104,7 +104,7 @@ const SLIDES: Slide[] = [
   {
     eyebrow: "BUILD YOUR STREAK",
     title: "Show up daily.",
-    body: "Finish at least one game a day to keep your streak alive. Miss a day and it resets — so come back tomorrow and keep the fire going.",
+    body: "Finish at least one game a day to keep your streak alive. No account needed to play — progress is saved on this device. Sign up any time to sync across devices and join the leaderboard.",
     art: StreakArt,
   },
 ];

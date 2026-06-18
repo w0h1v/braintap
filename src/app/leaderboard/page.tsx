@@ -9,6 +9,7 @@ import { getDailyLeaderboard, getLiveCount, type LeaderboardEntry } from "@/lib/
 import { useProgress } from "@/lib/progress";
 import { todayISO } from "@/lib/daily";
 import type { GameId } from "@/lib/types";
+import { GuestCta } from "@/components/GuestCta";
 import { cn } from "@/lib/cn";
 
 /** Today's featured/rotation game (falls back to the first game). */
@@ -191,8 +192,13 @@ export default function LeaderboardPage() {
         </div>
       </section>
 
+      {/* optional-account invite (guests only) */}
+      <section className="mx-auto mt-7 max-w-shell px-6 sm:px-8">
+        <GuestCta variant="leaderboard" />
+      </section>
+
       {/* main two-column layout */}
-      <section className="mx-auto mt-8 grid max-w-shell grid-cols-1 gap-5 px-6 sm:px-8 lg:grid-cols-[1.1fr_1fr]">
+      <section className="mx-auto mt-6 grid max-w-shell grid-cols-1 gap-5 px-6 sm:px-8 lg:grid-cols-[1.1fr_1fr]">
         {/* LEFT: today's leaderboard */}
         <Card className="p-6 sm:p-7">
           <div className="flex items-center justify-between gap-3">
