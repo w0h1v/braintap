@@ -35,6 +35,8 @@ export const metadata: Metadata = {
   applicationName: "BrainTap Games",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "BrainTap" },
+  // Standardised counterpart to apple-mobile-web-app-capable (Android/Chrome PWA).
+  other: { "mobile-web-app-capable": "yes" },
   openGraph: {
     type: "website",
     siteName: "BrainTap Games",
