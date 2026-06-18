@@ -14,6 +14,7 @@ import {
   Divider,
   GoogleMark,
   GuestNotice,
+  ContinueAsGuest,
 } from "@/components/auth/AuthUI";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -157,6 +158,8 @@ export default function SignupPage() {
                   Sign in
                 </Link>
               </p>
+
+              <ContinueAsGuest />
             </>
           )}
         </Card>

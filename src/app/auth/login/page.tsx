@@ -7,6 +7,7 @@ import { Button, GhostButton } from "@/components/ui/Button";
 import { useAuth } from "@/lib/auth";
 import {
   AuthShell,
+  ContinueAsGuest,
   Divider,
   EMAIL_RE,
   ErrorBanner,
@@ -107,6 +108,8 @@ export default function LoginPage() {
               Create an account
             </Link>
           </p>
+
+          <ContinueAsGuest />
         </>
       )}
     </AuthShell>

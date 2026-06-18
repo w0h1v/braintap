@@ -133,6 +133,32 @@ export function GoogleMark() {
   );
 }
 
+/**
+ * Secondary escape hatch shown beneath the sign-in / sign-up forms: an account
+ * is optional, so let people just go play. Progress saves locally; signing up
+ * later merges it into the cloud.
+ */
+export function ContinueAsGuest() {
+  return (
+    <div className="mt-5">
+      <Link
+        href="/"
+        className={cn(
+          "flex w-full items-center justify-center gap-2 rounded-xl border border-line-strong bg-white/[0.02] px-4 py-3",
+          "font-display text-sm text-ink-soft transition-colors duration-300",
+          "hover:border-cyan/45 hover:bg-cyan/[0.05] hover:text-[#eaf6ff]",
+        )}
+      >
+        Continue as guest
+        <span aria-hidden>→</span>
+      </Link>
+      <p className="mt-2 text-center text-xs text-ink-faint">
+        No account needed — your progress saves on this device.
+      </p>
+    </div>
+  );
+}
+
 export function GuestNotice() {
   return (
     <div className="flex flex-col items-center gap-4 py-2 text-center">
