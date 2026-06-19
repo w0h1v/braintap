@@ -3,10 +3,28 @@
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { Modal } from "@/components/ui/Modal";
-import type { Accent } from "@/lib/types";
+import type { Accent, Difficulty } from "@/lib/types";
 import { shareText as doShare } from "@/lib/share";
 import { Confetti } from "@/components/play/Confetti";
 import { shareResultImage } from "@/lib/shareImage";
+import { useActiveDifficulty } from "@/components/play/DifficultyContext";
+import { DIFFICULTY_META } from "@/lib/difficulty";
+
+/**
+ * Fold the active tier into a share string by tagging the leading
+ * `BrainTap · <Game>` header line (e.g. `… · Medium`). No-op when there is no
+ * tier or the text doesn't use the standard header, so it stays safe for every
+ * game's format.
+ */
+function withTier(text: string | undefined, tier: Difficulty | undefined): string | undefined {
+  if (!text || !tier) return text;
+  const label = DIFFICULTY_META[tier].label;
+  const nl = text.indexOf("\n");
+  const head = nl === -1 ? text : text.slice(0, nl);
+  if (!head.startsWith("BrainTap · ") || head.includes(` · ${label}`)) return text;
+  const rest = nl === -1 ? "" : text.slice(nl);
+  return `${head} · ${label}${rest}`;
+}
 
 export function CompletionModal({
   open,
@@ -35,13 +53,25 @@ export function CompletionModal({
 }) {
   const [shareLabel, setShareLabel] = useState("Share result");
   const [imageLabel, setImageLabel] = useState("Share image");
+  const tier = useActiveDifficulty();
+  const tierShare = withTier(share, tier);
 
   return (
     <>
     <Confetti active={open && won} accent={accent} />
     <Modal open={open} onClose={onClose} labelledBy="complete-title" className="text-center">
-      <div className="font-mono text-[11px] tracking-[0.2em]" style={{ color: accent.solid }}>
-        {won ? eyebrow : "NICE TRY"}
+      <div className="flex items-center justify-center gap-2">
+        <span className="font-mono text-[11px] tracking-[0.2em]" style={{ color: accent.solid }}>
+          {won ? eyebrow : "NICE TRY"}
+        </span>
+        {tier && (
+          <span
+            className="rounded-pill px-2 py-0.5 font-mono text-[9.5px] font-semibold uppercase tracking-[0.14em] text-[#04060f]"
+            style={{ backgroundColor: DIFFICULTY_META[tier].color }}
+          >
+            {DIFFICULTY_META[tier].label}
+          </span>
+        )}
       </div>
       <h2 id="complete-title" className="mt-2 font-display text-3xl font-semibold text-ink">
         {title}
@@ -81,7 +111,7 @@ export function CompletionModal({
         <button
           type="button"
           onClick={async () => {
-            const r = await doShare(share);
+            const r = await doShare(tierShare!);
             setShareLabel(r === "copied" ? "Copied!" : r === "shared" ? "Shared!" : "Try again");
             setTimeout(() => setShareLabel("Share result"), 1800);
           }}
@@ -96,12 +126,12 @@ export function CompletionModal({
         type="button"
         onClick={async () => {
           await shareResultImage({
-            gameName: eyebrow,
+            gameName: tier ? `${eyebrow} · ${DIFFICULTY_META[tier].label}` : eyebrow,
             title,
             statValue,
             statLabel,
             accent,
-            shareText: share,
+            shareText: tierShare,
           });
           setImageLabel("Saved!");
           setTimeout(() => setImageLabel("Share image"), 1800);

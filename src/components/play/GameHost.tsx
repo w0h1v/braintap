@@ -18,6 +18,7 @@ import { todayISO, dateLabel } from "@/lib/daily";
 import { DIFFICULTIES, DIFFICULTY_META, nextDifficulty } from "@/lib/difficulty";
 import { useGameClock } from "@/lib/useGameClock";
 import { GameIcon } from "@/components/GameIcon";
+import { DifficultyContext } from "@/components/play/DifficultyContext";
 import { cn } from "@/lib/cn";
 
 function fmtMs(ms: number): string {
@@ -307,18 +308,20 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
         aria-labelledby={supportsDiff ? `tier-tab-${difficulty}` : undefined}
         className="rounded-3xl border border-line bg-gradient-to-b from-[rgba(11,15,31,0.65)] to-[rgba(6,8,18,0.6)] p-4 sm:p-6"
       >
-        <GameComponent
-          key={componentKey}
-          puzzle={puzzle}
-          dateISO={dateISO}
-          onComplete={onComplete}
-          savedState={savedState}
-          onPersistState={onPersistState}
-          reducedMotion={Boolean(reducedMotion)}
-          isArchive={isArchive}
-          difficulty={activeDiff}
-          hostTimer={showHostTimer}
-        />
+        <DifficultyContext.Provider value={activeDiff}>
+          <GameComponent
+            key={componentKey}
+            puzzle={puzzle}
+            dateISO={dateISO}
+            onComplete={onComplete}
+            savedState={savedState}
+            onPersistState={onPersistState}
+            reducedMotion={Boolean(reducedMotion)}
+            isArchive={isArchive}
+            difficulty={activeDiff}
+            hostTimer={showHostTimer}
+          />
+        </DifficultyContext.Provider>
       </div>
 
       {tierResult && (
