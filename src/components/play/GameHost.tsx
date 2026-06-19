@@ -186,6 +186,21 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
 
   const nextTier = activeDiff ? nextDifficulty(activeDiff) : null;
 
+  // Tier navigation handed to the completion modal so it can name the tier,
+  // tag the share text, and offer a "next tier" CTA right where the player is
+  // looking (the modal covers the footer's progression button).
+  const tierNav = useMemo(
+    () =>
+      activeDiff
+        ? {
+            difficulty: activeDiff,
+            next: nextTier,
+            goNext: () => nextTier && setDifficulty(nextTier),
+          }
+        : null,
+    [activeDiff, nextTier],
+  );
+
   // Keyboard nav across the (unlocked) tier tabs — automatic activation.
   const onTabsKeyDown = (e: React.KeyboardEvent) => {
     const unlocked = DIFFICULTIES.filter((d) => isUnlocked(d));
@@ -308,7 +323,7 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
         aria-labelledby={supportsDiff ? `tier-tab-${difficulty}` : undefined}
         className="rounded-3xl border border-line bg-gradient-to-b from-[rgba(11,15,31,0.65)] to-[rgba(6,8,18,0.6)] p-4 sm:p-6"
       >
-        <DifficultyContext.Provider value={activeDiff}>
+        <DifficultyContext.Provider value={tierNav}>
           <GameComponent
             key={componentKey}
             puzzle={puzzle}

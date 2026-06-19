@@ -7,8 +7,9 @@ import type { Accent, Difficulty } from "@/lib/types";
 import { shareText as doShare } from "@/lib/share";
 import { Confetti } from "@/components/play/Confetti";
 import { shareResultImage } from "@/lib/shareImage";
-import { useActiveDifficulty } from "@/components/play/DifficultyContext";
+import { useTierNav } from "@/components/play/DifficultyContext";
 import { DIFFICULTY_META } from "@/lib/difficulty";
+import { cn } from "@/lib/cn";
 
 /**
  * Fold the active tier into a share string by tagging the leading
@@ -53,8 +54,11 @@ export function CompletionModal({
 }) {
   const [shareLabel, setShareLabel] = useState("Share result");
   const [imageLabel, setImageLabel] = useState("Share image");
-  const tier = useActiveDifficulty();
+  const nav = useTierNav();
+  const tier = nav?.difficulty;
   const tierShare = withTier(share, tier);
+  // Offer the next tier from inside the modal on a win — it's where attention is.
+  const showProgress = won && Boolean(tier);
 
   return (
     <>
@@ -107,6 +111,25 @@ export function CompletionModal({
         </div>
       )}
 
+      {showProgress &&
+        (nav!.next ? (
+          <button
+            type="button"
+            onClick={() => {
+              nav!.goNext();
+              onClose();
+            }}
+            className="mt-5 w-full rounded-xl py-3.5 font-display text-[15px] font-semibold text-[#04060f]"
+            style={{ backgroundColor: DIFFICULTY_META[nav!.next].color }}
+          >
+            Next up: {DIFFICULTY_META[nav!.next].label} →
+          </button>
+        ) : (
+          <div className="mt-5 rounded-xl border border-amber/30 bg-amber/[0.06] py-3 font-mono text-[11px] tracking-[0.14em] text-amber-soft">
+            ALL TIERS CLEARED 🎉
+          </div>
+        ))}
+
       {share && (
         <button
           type="button"
@@ -115,7 +138,10 @@ export function CompletionModal({
             setShareLabel(r === "copied" ? "Copied!" : r === "shared" ? "Shared!" : "Try again");
             setTimeout(() => setShareLabel("Share result"), 1800);
           }}
-          className="mt-5 w-full rounded-xl py-3.5 font-display text-[15px] font-semibold text-[#04060f]"
+          className={cn(
+            "w-full rounded-xl py-3.5 font-display text-[15px] font-semibold text-[#04060f]",
+            showProgress ? "mt-2.5" : "mt-5",
+          )}
           style={{ backgroundImage: `linear-gradient(118deg, ${accent.from}, ${accent.to})` }}
         >
           {shareLabel}
