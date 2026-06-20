@@ -80,6 +80,7 @@ export default function LeaderboardPage() {
   const hydrated = useProgress((s) => s.hydrated);
   // Re-derive when the player records a result so "You" splices in live.
   const results = useProgress((s) => s.results);
+  const tierResults = useProgress((s) => s.tierResults);
 
   const [selected, setSelected] = useState<GameId>(() => featuredGameId());
   const [tier, setTier] = useState<Difficulty>("medium");
@@ -135,6 +136,13 @@ export default function LeaderboardPage() {
     if (liveTarget <= 0) return 0;
     return 70 + (liveTarget % 40);
   }, [liveTarget]);
+
+  // The player's own recorded result for the selected game + tier today. Shown
+  // in the coming-soon state so they can see their score is already tracked.
+  const myResult = useMemo(() => {
+    const tiers = tierResults[today]?.[selected];
+    return tiers?.[tier] ?? (tiers ? undefined : results[today]?.[selected]) ?? null;
+  }, [tierResults, results, today, selected, tier]);
 
   return (
     <>
@@ -292,8 +300,36 @@ export default function LeaderboardPage() {
                 />
               ))
             ) : entries.length === 0 ? (
-              <div className="rounded-xl border border-line bg-white/[0.02] p-6 text-center text-sm text-ink-mute">
-                No scores yet today. Be the first to tap in.
+              <div className="rounded-2xl border border-line bg-white/[0.02] p-7 text-center">
+                <div className="text-2xl" aria-hidden>
+                  🏆
+                </div>
+                <h3 className="mt-2 font-display text-lg font-semibold text-ink">
+                  Leaderboards are coming soon
+                </h3>
+                <p className="mx-auto mt-2 max-w-[360px] text-sm leading-relaxed text-ink-mute">
+                  Global rankings go live once enough players have tapped in. Your
+                  results are already being saved — play today and you&apos;ll be on
+                  the board the moment it opens.
+                </p>
+                {myResult ? (
+                  <div className="mx-auto mt-4 flex max-w-[300px] items-center justify-between gap-3 rounded-xl border border-cyan/25 bg-cyan/[0.08] px-4 py-2.5">
+                    <span className="font-mono text-[10.5px] tracking-[0.1em] text-cyan-soft">
+                      YOUR {DIFFICULTY_META[tier].label.toUpperCase()} RESULT
+                    </span>
+                    <span className="font-mono text-[12px] text-ink">
+                      {myResult.timeMs ? fmtTime(myResult.timeMs) : "—"} · {myResult.score} pts
+                    </span>
+                  </div>
+                ) : (
+                  <Link
+                    href={`/play/${selected}`}
+                    className="mt-4 inline-block rounded-xl px-4 py-2 font-display text-sm font-semibold text-[#04060f]"
+                    style={{ backgroundImage: `linear-gradient(118deg, ${meta.accent.from}, ${meta.accent.to})` }}
+                  >
+                    Play {meta.name} →
+                  </Link>
+                )}
               </div>
             ) : (
               entries.map((e) => (
@@ -334,7 +370,7 @@ export default function LeaderboardPage() {
             )}
           </div>
 
-          {hydrated && !loading && !entries.some((e) => e.isYou) ? (
+          {hydrated && !loading && entries.length > 0 && !entries.some((e) => e.isYou) ? (
             <div className="mt-4 rounded-xl border border-line bg-white/[0.02] p-3.5 text-center text-xs text-ink-mute">
               You haven&apos;t played {meta.name} today.{" "}
               <Link href={`/play/${selected}`} className="text-cyan hover:underline">
@@ -357,22 +393,36 @@ export default function LeaderboardPage() {
           >
             <div className="flex items-center gap-2 font-mono text-[10.5px] tracking-[0.2em] text-cyan-soft">
               <span className="h-1.5 w-1.5 animate-pulse2 rounded-full bg-cyan shadow-[0_0_8px_#00e5ff]" />
-              LIVE
+              {liveTarget > 0 ? "LIVE" : "SOON"}
             </div>
-            <div className="mt-3 font-display text-[clamp(38px,6vw,56px)] font-semibold leading-none tabular-nums text-ink">
-              {liveCount.toLocaleString()}
-            </div>
-            <p className="mt-3 text-[15px] leading-relaxed text-ink-soft">
-              minds tapped in today
-              {countries > 0 ? (
-                <>
-                  , across{" "}
-                  <span className="font-semibold text-cyan-soft">{countries}</span>{" "}
-                  countries
-                </>
-              ) : null}
-              .
-            </p>
+            {liveTarget > 0 ? (
+              <>
+                <div className="mt-3 font-display text-[clamp(38px,6vw,56px)] font-semibold leading-none tabular-nums text-ink">
+                  {liveCount.toLocaleString()}
+                </div>
+                <p className="mt-3 text-[15px] leading-relaxed text-ink-soft">
+                  minds tapped in today
+                  {countries > 0 ? (
+                    <>
+                      , across{" "}
+                      <span className="font-semibold text-cyan-soft">{countries}</span>{" "}
+                      countries
+                    </>
+                  ) : null}
+                  .
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="mt-3 font-display text-[clamp(26px,5vw,38px)] font-semibold leading-tight text-ink">
+                  Be the first.
+                </div>
+                <p className="mt-3 text-[15px] leading-relaxed text-ink-soft">
+                  Live player counts switch on at launch — play today and you&apos;ll
+                  be counted.
+                </p>
+              </>
+            )}
           </div>
 
           {/* discussion */}
