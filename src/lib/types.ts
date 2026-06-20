@@ -16,7 +16,12 @@ export type GameId =
   | "schulte"
   | "simon"
   | "slide"
-  | "reversi";
+  | "reversi"
+  | "crossword"
+  | "matrix"
+  | "stroop"
+  | "mathsprint"
+  | "spotchange";
 
 /** Daily difficulty tiers. Each game serves one puzzle per tier per day. */
 export type Difficulty = "easy" | "medium" | "hard";

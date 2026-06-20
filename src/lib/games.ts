@@ -17,6 +17,11 @@ import schulte from "@/games/schulte";
 import simon from "@/games/simon";
 import slide from "@/games/slide";
 import reversi from "@/games/reversi";
+import crossword from "@/games/crossword";
+import matrix from "@/games/matrix";
+import stroop from "@/games/stroop";
+import mathsprint from "@/games/mathsprint";
+import spotchange from "@/games/spotchange";
 
 export const GAME_MODULES: Record<GameId, AnyGameModule> = {
   connections,
@@ -34,6 +39,11 @@ export const GAME_MODULES: Record<GameId, AnyGameModule> = {
   simon,
   slide,
   reversi,
+  crossword,
+  matrix,
+  stroop,
+  mathsprint,
+  spotchange,
 };
 
 /** All game modules in hub display order. */
