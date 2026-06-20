@@ -385,7 +385,10 @@ export function Forge({
             display: "grid",
             gridTemplateColumns: `clamp(30px, 12vw, 50px) repeat(${N}, minmax(0, 1fr))`,
             gap: "clamp(3px, 1vw, 5px)",
-            width: "min(92vw, 420px)",
+            // Fill the w-full / maxWidth:420 wrapper above. Using 92vw here made
+            // the grid wider than that wrapper, and `mx-auto` then collapsed to 0
+            // and let it overflow the viewport on phones (≤ ~800px wide).
+            width: "100%",
             touchAction: "manipulation",
             boxShadow: won
               ? `0 0 0 1px ${FILL}, 0 0 34px rgba(255,176,32,.28)`
