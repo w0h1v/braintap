@@ -1,5 +1,8 @@
 import type { Accent } from "@/lib/types";
 
+/** How the image was delivered, so callers can confirm accurately. */
+export type ShareImageOutcome = "shared" | "downloaded" | "failed";
+
 const SIZE = 1080;
 
 function roundRect(
@@ -31,15 +34,15 @@ export async function shareResultImage(opts: {
   statLabel?: string;
   accent: Accent;
   shareText?: string;
-}): Promise<void> {
+}): Promise<ShareImageOutcome> {
   try {
-    if (typeof document === "undefined") return;
+    if (typeof document === "undefined") return "failed";
 
     const canvas = document.createElement("canvas");
     canvas.width = SIZE;
     canvas.height = SIZE;
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) return "failed";
 
     const { accent } = opts;
 
@@ -151,7 +154,7 @@ export async function shareResultImage(opts: {
     const blob = await new Promise<Blob | null>((resolve) =>
       canvas.toBlob((b) => resolve(b), "image/png"),
     );
-    if (!blob) return;
+    if (!blob) return "failed";
 
     const fileName = `braintap-${slug(opts.gameName)}.png`;
     const file = new File([blob], fileName, { type: "image/png" });
@@ -169,7 +172,7 @@ export async function shareResultImage(opts: {
     ) {
       try {
         await nav.share(shareData);
-        return;
+        return "shared";
       } catch {
         // user cancelled or share failed — fall through to download
       }
@@ -184,8 +187,10 @@ export async function shareResultImage(opts: {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
+    return "downloaded";
   } catch {
     // Never throw — sharing is best-effort.
+    return "failed";
   }
 }
 

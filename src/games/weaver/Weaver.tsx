@@ -21,7 +21,7 @@ import {
   type WeaverPuzzle,
 } from "./engine";
 
-const MAX_HINTS = 3;
+export const MAX_HINTS = 3;
 /** Score deducted per hint used (applied to the final normalized score). */
 const HINT_PENALTY = 5;
 

@@ -1,6 +1,6 @@
 import { defineGame } from "@/lib/types";
 import { GAME_METAS } from "@/games/_meta";
-import { Forge } from "./Forge";
+import { Forge, MAX_HINTS } from "./Forge";
 import { getDailyPuzzle } from "./generator";
 import { validateForge, type ForgePuzzle } from "./engine";
 
@@ -11,4 +11,5 @@ export default defineGame<ForgePuzzle, any>({
   Component: Forge,
   validatePuzzle: validateForge,
   supportsDifficulty: true,
+  hintsByDifficulty: MAX_HINTS,
 });

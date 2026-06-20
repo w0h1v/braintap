@@ -135,6 +135,12 @@ export interface GameModule<P = unknown, S = unknown> {
    * their own (e.g. a countdown), where a count-up timer would mislead.
    */
   hostTimer?: boolean;
+  /**
+   * Hints granted per difficulty tier, surfaced on the tier selector so players
+   * see the allotment before committing. A single number = the same count for
+   * every tier; a map = explicit per-tier counts. Omit for games with no hints.
+   */
+  hintsByDifficulty?: number | Partial<Record<Difficulty, number>>;
 }
 
 /**

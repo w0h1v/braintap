@@ -1,6 +1,6 @@
 import { defineGame } from "@/lib/types";
 import { GAME_METAS } from "@/games/_meta";
-import { Weaver } from "./Weaver";
+import { Weaver, MAX_HINTS } from "./Weaver";
 import { getDailyPuzzle } from "./generator";
 import { validateWeaver, type WeaverPuzzle } from "./engine";
 
@@ -11,4 +11,5 @@ export default defineGame<WeaverPuzzle, any>({
   Component: Weaver,
   validatePuzzle: validateWeaver,
   supportsDifficulty: true,
+  hintsByDifficulty: MAX_HINTS,
 });

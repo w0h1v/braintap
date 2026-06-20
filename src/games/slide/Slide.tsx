@@ -32,7 +32,7 @@ const INSIGHT =
 // Fluid board sizing shared by every full-width row so nothing overflows at 360px.
 const BOARD_W = "min(92vw, 360px)";
 
-const MAX_HINTS = 3;
+export const MAX_HINTS = 3;
 const HINT_PENALTY = 8; // score points deducted per hint used
 // Tile-slide transition duration (ms). Kept in sync with the CSS transition.
 const SLIDE_MS = 140;

@@ -24,7 +24,7 @@ import {
   type Placement,
 } from "./engine";
 
-const MAX_HINTS = 3;
+export const MAX_HINTS = 3;
 
 const ACCENT = GAME_METAS.pips.accent;
 const INSIGHT =

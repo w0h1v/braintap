@@ -1,6 +1,6 @@
 import { defineGame } from "@/lib/types";
 import { GAME_METAS } from "@/games/_meta";
-import { Connections } from "./Connections";
+import { Connections, MAX_HINTS } from "./Connections";
 import { getDailyPuzzle } from "./generator";
 import { validateConnections, type ConnectionsPuzzle } from "./engine";
 
@@ -11,4 +11,5 @@ export default defineGame<ConnectionsPuzzle, any>({
   Component: Connections,
   validatePuzzle: validateConnections,
   supportsDifficulty: true,
+  hintsByDifficulty: MAX_HINTS,
 });

@@ -6,6 +6,7 @@ import { useProgress } from "@/lib/progress";
 import { todayISO } from "@/lib/daily";
 import { shareText as doShare } from "@/lib/share";
 import { GAME_METAS } from "@/games/_meta";
+import { useToast } from "@/components/ui/Toast";
 import { cn } from "@/lib/cn";
 
 const ACCENT = GAME_METAS.weaver.accent;
@@ -95,6 +96,7 @@ export function CleanSweep() {
 
   const [open, setOpen] = useState(false);
   const [shareLabel, setShareLabel] = useState("Share Clean Sweep");
+  const toast = useToast();
 
   const today = todayISO();
   const todayCount = useMemo(
@@ -180,6 +182,8 @@ export function CleanSweep() {
               r === "copied" ? "Copied!" : r === "shared" ? "Shared!" : "Try again",
             );
             setTimeout(() => setShareLabel("Share Clean Sweep"), 1800);
+            if (r === "copied") toast.show("Copied to clipboard");
+            else if (r === "shared") toast.show("Shared!");
           }}
           className="mt-5 w-full rounded-xl py-3.5 font-display text-[15px] font-semibold text-[#04060f]"
           style={{ backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})` }}

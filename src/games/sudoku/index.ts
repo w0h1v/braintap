@@ -1,6 +1,6 @@
 import { defineGame } from "@/lib/types";
 import { GAME_METAS } from "@/games/_meta";
-import { Sudoku } from "./Sudoku";
+import { Sudoku, MAX_HINTS } from "./Sudoku";
 import { getDailyPuzzle } from "./generator";
 import { validateSudoku, type SudokuPuzzle } from "./engine";
 
@@ -11,4 +11,5 @@ export default defineGame<SudokuPuzzle, any>({
   Component: Sudoku,
   validatePuzzle: validateSudoku,
   supportsDifficulty: true,
+  hintsByDifficulty: MAX_HINTS,
 });

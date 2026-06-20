@@ -6,6 +6,7 @@ import { useProgress } from "@/lib/progress";
 import { ProfileSync } from "@/components/ProfileSync";
 import { Onboarding } from "@/components/Onboarding";
 import { CleanSweep } from "@/components/CleanSweep";
+import { ToastProvider } from "@/components/ui/Toast";
 
 /** Applies the zen-mode data attribute to the root element. */
 function ZenController() {
@@ -21,11 +22,13 @@ function ZenController() {
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <AuthProvider>
-      <ZenController />
-      <ProfileSync />
-      {children}
-      <Onboarding />
-      <CleanSweep />
+      <ToastProvider>
+        <ZenController />
+        <ProfileSync />
+        {children}
+        <Onboarding />
+        <CleanSweep />
+      </ToastProvider>
     </AuthProvider>
   );
 }

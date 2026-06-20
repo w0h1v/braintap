@@ -94,6 +94,18 @@ interface RTile {
   pop?: boolean;
 }
 
+/** State captured immediately before a move, for single-step undo. */
+interface G2048Snapshot {
+  grid: number[];
+  score: number;
+  best: number;
+  spawnIndex: number;
+  won: boolean;
+  over: boolean;
+  continued: boolean;
+  moves: number;
+}
+
 const KEY_TO_DIR: Record<string, Direction> = {
   ArrowUp: "U",
   ArrowDown: "D",
@@ -159,6 +171,9 @@ export function G2048({
 
   const completedRef = useRef(saved?.completed ?? false);
   const movesRef = useRef(0);
+  // Single-step undo: holds the committed state just before the most recent move.
+  const undoRef = useRef<G2048Snapshot | null>(null);
+  const [undoAvailable, setUndoAvailable] = useState(false);
 
   // --- Timing -----------------------------------------------------------------
   // Wall-clock play time for the run, so result.timeMs is reported. The host
@@ -351,6 +366,19 @@ export function G2048({
         return;
       }
 
+      // Bank the pre-move state so this single move can be undone.
+      undoRef.current = {
+        grid: grid.slice(),
+        score,
+        best,
+        spawnIndex,
+        won,
+        over,
+        continued,
+        moves: movesRef.current,
+      };
+      setUndoAvailable(true);
+
       movesRef.current += 1;
 
       // Spawn the next scripted tile into an empty cell.
@@ -453,12 +481,79 @@ export function G2048({
         fireComplete(after, nextScore, false);
       }
     },
-    [grid, tiles, locked, puzzle.spawns, spawnIndex, score, best, won, reducedMotion, fireComplete, target],
+    [grid, tiles, locked, puzzle.spawns, spawnIndex, score, best, won, over, continued, reducedMotion, fireComplete, target],
   );
+
+  // Single-step undo — revert the last committed move. Available during active
+  // play only (not once the run is won/over) and only when a move is banked.
+  const undo = useCallback(() => {
+    const snap = undoRef.current;
+    if (!snap || locked || animatingRef.current) return;
+    for (const t of animTimers.current) clearTimeout(t);
+    animTimers.current = [];
+    animatingRef.current = false;
+    setGrid(snap.grid.slice());
+    setScore(snap.score);
+    setBest(snap.best);
+    setSpawnIndex(snap.spawnIndex);
+    setWon(snap.won);
+    setOver(snap.over);
+    setContinued(snap.continued);
+    movesRef.current = snap.moves;
+    const rebuilt = tilesFromGrid(snap.grid, idRef.current);
+    idRef.current = rebuilt.nextId;
+    setTiles(rebuilt.tiles);
+    undoRef.current = null;
+    setUndoAvailable(false);
+    setNudge(null);
+    sfx.tap();
+    haptics.tap();
+  }, [locked]);
+
+  // Restart the current puzzle from its scripted opening. Resets the board,
+  // score and clock and re-arms the live timer. The daily lock is untouched: a
+  // replay after the result is recorded stays practice and never re-records.
+  const restart = useCallback(() => {
+    for (const t of animTimers.current) clearTimeout(t);
+    animTimers.current = [];
+    animatingRef.current = false;
+    const fresh = puzzle.start.slice();
+    // Reset the play clock for a fresh attempt and re-arm the live segment.
+    baseElapsedRef.current = 0;
+    segStartRef.current = null;
+    finalMsRef.current = null;
+    setElapsedMs(0);
+    movesRef.current = 0;
+    undoRef.current = null;
+    setUndoAvailable(false);
+    setGrid(fresh);
+    setScore(0);
+    setSpawnIndex(0);
+    setWon(false);
+    setOver(false);
+    setContinued(false);
+    setShowModal(false);
+    setNudge(null);
+    const rebuilt = tilesFromGrid(fresh, idRef.current);
+    idRef.current = rebuilt.nextId;
+    setTiles(rebuilt.tiles);
+    sfx.tap();
+    haptics.tap();
+  }, [puzzle.start]);
 
   // Keyboard: arrows + WASD.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "u" || e.key === "U") {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        restart();
+        return;
+      }
       const dir = KEY_TO_DIR[e.key];
       if (!dir) return;
       e.preventDefault();
@@ -466,7 +561,8 @@ export function G2048({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [doMove]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doMove, undo, restart]);
 
   // Swipe input on the board.
   const touchStart = useRef<{ x: number; y: number } | null>(null);
@@ -712,6 +808,35 @@ export function G2048({
       <p className="mt-3.5 font-mono text-[10.5px]" style={{ color: "rgba(226,234,255,0.4)" }}>
         Arrow keys, WASD, or swipe
       </p>
+
+      {/* Undo + Restart */}
+      <div className="mt-3.5 flex items-center gap-2.5">
+        <button
+          type="button"
+          onClick={undo}
+          disabled={!undoAvailable || locked}
+          aria-label="Undo last move"
+          className={cn(
+            "inline-flex min-h-[44px] items-center gap-1.5 rounded-pill border px-5 py-2 font-display text-[13px] text-[#eaf1ff] disabled:cursor-not-allowed disabled:opacity-40",
+            !reducedMotion && "transition-transform active:scale-[0.98]",
+          )}
+          style={{ borderColor: "rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.04)" }}
+        >
+          <span aria-hidden>↩</span> Undo
+        </button>
+        <button
+          type="button"
+          onClick={restart}
+          aria-label="Restart this puzzle"
+          className={cn(
+            "inline-flex min-h-[44px] items-center gap-1.5 rounded-pill border px-5 py-2 font-display text-[13px] text-[#eaf1ff]",
+            !reducedMotion && "transition-transform active:scale-[0.98]",
+          )}
+          style={{ borderColor: "rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.04)" }}
+        >
+          <span aria-hidden>↻</span> Restart
+        </button>
+      </div>
 
       {locked && (
         <button

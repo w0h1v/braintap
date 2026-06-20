@@ -1,6 +1,6 @@
 import { defineGame } from "@/lib/types";
 import { GAME_METAS } from "@/games/_meta";
-import { Pips } from "./Pips";
+import { Pips, MAX_HINTS } from "./Pips";
 import { getDailyPuzzle } from "./generator";
 import { validatePips, type PipsPuzzle } from "./engine";
 
@@ -11,4 +11,5 @@ export default defineGame<PipsPuzzle, any>({
   Component: Pips,
   validatePuzzle: validatePips,
   supportsDifficulty: true,
+  hintsByDifficulty: MAX_HINTS,
 });

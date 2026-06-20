@@ -9,6 +9,7 @@ import { Confetti } from "@/components/play/Confetti";
 import { shareResultImage } from "@/lib/shareImage";
 import { useTierNav } from "@/components/play/DifficultyContext";
 import { DIFFICULTY_META } from "@/lib/difficulty";
+import { useToast } from "@/components/ui/Toast";
 import { cn } from "@/lib/cn";
 
 /**
@@ -54,6 +55,7 @@ export function CompletionModal({
 }) {
   const [shareLabel, setShareLabel] = useState("Share result");
   const [imageLabel, setImageLabel] = useState("Share image");
+  const toast = useToast();
   const nav = useTierNav();
   const tier = nav?.difficulty;
   const tierShare = withTier(share, tier);
@@ -137,6 +139,10 @@ export function CompletionModal({
             const r = await doShare(tierShare!);
             setShareLabel(r === "copied" ? "Copied!" : r === "shared" ? "Shared!" : "Try again");
             setTimeout(() => setShareLabel("Share result"), 1800);
+            // Skip a toast on "failed": that path includes a deliberate cancel
+            // of the native share sheet, where an error would only annoy.
+            if (r === "copied") toast.show("Result copied to clipboard");
+            else if (r === "shared") toast.show("Shared!");
           }}
           className={cn(
             "w-full rounded-xl py-3.5 font-display text-[15px] font-semibold text-[#04060f]",
@@ -151,7 +157,7 @@ export function CompletionModal({
       <button
         type="button"
         onClick={async () => {
-          await shareResultImage({
+          const r = await shareResultImage({
             gameName: tier ? `${eyebrow} · ${DIFFICULTY_META[tier].label}` : eyebrow,
             title,
             statValue,
@@ -159,8 +165,11 @@ export function CompletionModal({
             accent,
             shareText: tierShare,
           });
-          setImageLabel("Saved!");
+          setImageLabel(r === "shared" ? "Shared!" : r === "downloaded" ? "Saved!" : "Try again");
           setTimeout(() => setImageLabel("Share image"), 1800);
+          if (r === "shared") toast.show("Image shared");
+          else if (r === "downloaded") toast.show("Image saved to your device");
+          else toast.show("Couldn't create image", { variant: "error" });
         }}
         className="mt-2.5 w-full rounded-xl border py-3 font-display text-sm font-semibold"
         style={{

@@ -186,6 +186,13 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
 
   const nextTier = activeDiff ? nextDifficulty(activeDiff) : null;
 
+  // Per-tier hint allotment, surfaced as a note on the tier selector so players
+  // see the budget before committing. Only games that declare hints show it.
+  const hintsCfg = game.hintsByDifficulty;
+  const flatHints = typeof hintsCfg === "number" ? hintsCfg : null;
+  const hintsFor = (d: Difficulty): number | undefined =>
+    hintsCfg == null ? undefined : typeof hintsCfg === "number" ? hintsCfg : hintsCfg[d];
+
   // Tier navigation handed to the completion modal so it can name the tier,
   // tag the share text, and offer a "next tier" CTA right where the player is
   // looking (the modal covers the footer's progression button).
@@ -313,6 +320,32 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
               frozenMs={tierWon ? tierResult?.timeMs ?? 0 : null}
               onMs={onMs}
             />
+          )}
+        </div>
+      )}
+
+      {supportsDiff && hintsCfg != null && (
+        <div className="-mt-1.5 mb-4 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[11px] text-ink-mute">
+          <span aria-hidden>💡</span>
+          {flatHints != null ? (
+            <span>
+              {flatHints === 0
+                ? "No hints"
+                : `${flatHints} hint${flatHints === 1 ? "" : "s"}`}{" "}
+              available
+            </span>
+          ) : (
+            <>
+              <span>Hints</span>
+              {DIFFICULTIES.map((d) => (
+                <span key={d} className="tabular-nums">
+                  <span style={{ color: DIFFICULTY_META[d].color }}>
+                    {DIFFICULTY_META[d].label}
+                  </span>{" "}
+                  {hintsFor(d) ?? 0}
+                </span>
+              ))}
+            </>
           )}
         </div>
       )}

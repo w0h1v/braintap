@@ -1,6 +1,6 @@
 import { defineGame } from "@/lib/types";
 import { GAME_METAS } from "@/games/_meta";
-import { Slide } from "./Slide";
+import { Slide, MAX_HINTS } from "./Slide";
 import { getDailyPuzzle } from "./generator";
 import { validateSlide, type SlidePuzzle } from "./engine";
 
@@ -11,4 +11,5 @@ export default defineGame<SlidePuzzle, any>({
   Component: Slide,
   validatePuzzle: validateSlide,
   supportsDifficulty: true,
+  hintsByDifficulty: MAX_HINTS,
 });

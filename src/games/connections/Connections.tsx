@@ -31,7 +31,7 @@ function maxMistakesFor(puzzle: ConnectionsPuzzle): number {
 const ACCENT = GAME_METAS.connections.accent;
 
 /** Hints allowed per game. */
-const MAX_HINTS = 1;
+export const MAX_HINTS = 1;
 /** Score penalty per hint used on a win. */
 const HINT_PENALTY = 20;
 

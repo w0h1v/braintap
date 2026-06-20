@@ -22,7 +22,7 @@ import {
 } from "./engine";
 
 const ACCENT = GAME_METAS.sudoku.accent;
-const MAX_HINTS = 3;
+export const MAX_HINTS = 3;
 const HINT_PENALTY = 8;
 const INSIGHT =
   "Sudoku leans on working memory and deductive logic — you hold candidate numbers in mind while systematically ruling out the impossible.";

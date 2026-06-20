@@ -22,7 +22,7 @@ import {
 } from "./engine";
 
 const ACCENT = GAME_METAS.forge.accent;
-const MAX_HINTS = 3;
+export const MAX_HINTS = 3;
 const HINT_PENALTY = 8;
 const INSIGHT =
   "Nonograms recruit the parietal lobe's spatial reasoning while your working memory juggles overlapping row and column constraints — deduction made visual.";
