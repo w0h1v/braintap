@@ -889,9 +889,9 @@ export function G2048({
 
       <style>{`
         @keyframes g2048Merge {
-          0% { transform: scale(1); }
-          55% { transform: scale(1.18); }
-          100% { transform: scale(1); }
+          0% { transform: scale(1); filter: brightness(1); }
+          55% { transform: scale(1.18); filter: brightness(1.4); }
+          100% { transform: scale(1); filter: brightness(1); }
         }
         @keyframes g2048Spawn {
           0% { transform: scale(0.1); opacity: 0; }

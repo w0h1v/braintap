@@ -19,6 +19,7 @@ import { DIFFICULTIES, DIFFICULTY_META, nextDifficulty } from "@/lib/difficulty"
 import { useGameClock } from "@/lib/useGameClock";
 import { GameIcon } from "@/components/GameIcon";
 import { DifficultyContext } from "@/components/play/DifficultyContext";
+import { WinCelebration } from "@/components/play/WinCelebration";
 import { cn } from "@/lib/cn";
 
 function fmtMs(ms: number): string {
@@ -116,6 +117,8 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
   );
 
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
+  // Bumped on each win to (re)play the brief win-celebration beat.
+  const [winBurst, setWinBurst] = useState(0);
   const initRef = useRef(false);
   useEffect(() => {
     if (!supportsDiff || !hydrated || initRef.current) return;
@@ -167,6 +170,8 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
         ? { ...result, timeMs: result.timeMs ?? fallback }
         : result;
       recordResult(gameId, dateISO, finalResult, !isArchive, activeDiff);
+      // A short celebratory beat just before the game's completion modal rises.
+      if (result.status === "won") setWinBurst((n) => n + 1);
       void syncProgress();
     },
     [recordResult, gameId, dateISO, isArchive, activeDiff, supportsDiff, showHostTimer],
@@ -227,6 +232,7 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
 
   return (
     <div className="mx-auto max-w-shell px-4 pb-16 pt-24 sm:px-6">
+      <WinCelebration trigger={winBurst} accent={meta.accent} reducedMotion={Boolean(reducedMotion)} />
       {/* header */}
       <div className="mb-4 flex items-center justify-between gap-3">
         <Link

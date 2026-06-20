@@ -30,6 +30,28 @@ const INSIGHT =
 const CONFLICT = "#ff6b9d";
 const SAME = "#00e5ff";
 
+/**
+ * Cells of the row, column and 2×3 box containing `cell` that are now fully
+ * filled and correct — drives the per-region success flash (VIS-1).
+ */
+function completedUnitCells(g: number[], cell: number, solution: number[]): number[] {
+  const r = Math.floor(cell / N);
+  const c = cell % N;
+  const out = new Set<number>();
+  const correctFull = (cells: number[]) =>
+    cells.every((i) => g[i] !== 0 && g[i] === solution[i]);
+  const row = Array.from({ length: N }, (_, k) => idx(r, k));
+  if (correctFull(row)) row.forEach((i) => out.add(i));
+  const col = Array.from({ length: N }, (_, k) => idx(k, c));
+  if (correctFull(col)) col.forEach((i) => out.add(i));
+  const br = Math.floor(r / 2) * 2;
+  const bc = Math.floor(c / 3) * 3;
+  const box: number[] = [];
+  for (let dr = 0; dr < 2; dr++) for (let dc = 0; dc < 3; dc++) box.push(idx(br + dr, bc + dc));
+  if (correctFull(box)) box.forEach((i) => out.add(i));
+  return [...out];
+}
+
 interface SudokuState {
   entries: number[];
   notes: number[][];
@@ -77,6 +99,9 @@ export function Sudoku({
   );
   const [revealCell, setRevealCell] = useState<number | null>(null);
   const [shake, setShake] = useState(false);
+  // Cells briefly flashing after their row/column/box was completed (VIS-1).
+  const [flashCells, setFlashCells] = useState<Set<number>>(() => new Set());
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [solving, setSolving] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const mistakesRef = useRef(0);
@@ -217,6 +242,24 @@ export function Sudoku({
     [finish, puzzle.solution, reducedMotion],
   );
 
+  // Briefly flash a just-completed row/column/box in the game accent (VIS-1).
+  const flashUnits = useCallback(
+    (cells: number[]) => {
+      if (reducedMotion || cells.length === 0) return;
+      setFlashCells(new Set(cells));
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => setFlashCells(new Set()), 650);
+    },
+    [reducedMotion],
+  );
+
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    },
+    [],
+  );
+
   const inputDigit = useCallback(
     (n: number) => {
       if (won || selected == null || puzzle.given[selected]) return;
@@ -247,11 +290,17 @@ export function Sudoku({
           nn[selected] = new Set();
           return nn;
         });
-        queueMicrotask(() => tryComplete(g));
+        const target = selected;
+        queueMicrotask(() => {
+          tryComplete(g);
+          if (!g.every((v, k) => v === puzzle.solution[k])) {
+            flashUnits(completedUnitCells(g, target, puzzle.solution));
+          }
+        });
         return next;
       });
     },
-    [won, selected, notesMode, puzzle, tryComplete, pushHistory],
+    [won, selected, notesMode, puzzle, tryComplete, pushHistory, flashUnits],
   );
 
   const erase = useCallback(() => {
@@ -302,10 +351,15 @@ export function Sudoku({
       next[cell] = value;
       const g = puzzle.puzzle.slice();
       for (let i = 0; i < CELLS; i++) if (!puzzle.given[i]) g[i] = next[i];
-      queueMicrotask(() => tryComplete(g));
+      queueMicrotask(() => {
+        tryComplete(g);
+        if (!g.every((v, k) => v === puzzle.solution[k])) {
+          flashUnits(completedUnitCells(g, cell, puzzle.solution));
+        }
+      });
       return next;
     });
-  }, [won, hintsUsed, grid, puzzle, reducedMotion, tryComplete, pushHistory]);
+  }, [won, hintsUsed, grid, puzzle, reducedMotion, tryComplete, pushHistory, flashUnits]);
 
   const move = useCallback((dr: number, dc: number) => {
     setSelected((cur) => {
@@ -436,6 +490,7 @@ export function Sudoku({
           const conflict = conflicts[i];
           const cellNotes = notes[i];
           const isHint = hintCells.has(i);
+          const isFlash = flashCells.has(i);
 
           let bg = "rgba(6,10,22,0.55)";
           if (isSel) bg = `${ACCENT.solid}4d`;
@@ -443,6 +498,7 @@ export function Sudoku({
           else if (isPeer) bg = "rgba(255,255,255,0.05)";
           if (isHint && !isSel) bg = "rgba(0,229,255,0.14)";
           if (conflict) bg = "rgba(255,107,157,0.18)";
+          if (isFlash) bg = `${ACCENT.solid}40`;
 
           const color = conflict ? CONFLICT : isHint ? SAME : given ? ACCENT.soft : "#eafcff";
 
@@ -481,10 +537,16 @@ export function Sudoku({
                 animation:
                   solving && !reducedMotion
                     ? `btSolve 0.5s ease ${revealDelay}ms both`
-                    : revealCell === i && !reducedMotion
-                      ? "btPop 0.32s ease both"
-                      : undefined,
-                boxShadow: isSel ? `inset 0 0 0 2px ${ACCENT.solid}` : undefined,
+                    : isFlash && !reducedMotion
+                      ? "btSolve 0.5s ease both"
+                      : revealCell === i && !reducedMotion
+                        ? "btPop 0.32s ease both"
+                        : undefined,
+                boxShadow: isSel
+                  ? `inset 0 0 0 2px ${ACCENT.solid}`
+                  : isFlash
+                    ? `inset 0 0 0 2px ${ACCENT.solid}, 0 0 18px -4px ${ACCENT.solid}`
+                    : undefined,
                 borderRight:
                   c === N - 1
                     ? "none"
