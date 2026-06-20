@@ -7,6 +7,7 @@ import { ProfileSync } from "@/components/ProfileSync";
 import { Onboarding } from "@/components/Onboarding";
 import { CleanSweep } from "@/components/CleanSweep";
 import { ToastProvider } from "@/components/ui/Toast";
+import { EntitlementProvider } from "@/lib/entitlement";
 
 /** Applies the zen-mode data attribute to the root element. */
 function ZenController() {
@@ -22,13 +23,15 @@ function ZenController() {
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <AuthProvider>
-      <ToastProvider>
-        <ZenController />
-        <ProfileSync />
-        {children}
-        <Onboarding />
-        <CleanSweep />
-      </ToastProvider>
+      <EntitlementProvider>
+        <ToastProvider>
+          <ZenController />
+          <ProfileSync />
+          {children}
+          <Onboarding />
+          <CleanSweep />
+        </ToastProvider>
+      </EntitlementProvider>
     </AuthProvider>
   );
 }

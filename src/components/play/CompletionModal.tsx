@@ -10,6 +10,7 @@ import { shareResultImage } from "@/lib/shareImage";
 import { useTierNav } from "@/components/play/DifficultyContext";
 import { DIFFICULTY_META } from "@/lib/difficulty";
 import { rankForScore } from "@/lib/rank";
+import { maybeInterstitial } from "@/lib/ads";
 import { useToast } from "@/components/ui/Toast";
 import { cn } from "@/lib/cn";
 
@@ -209,6 +210,7 @@ export function CompletionModal({
 
       <Link
         href="/"
+        onClick={() => void maybeInterstitial("return-home")}
         className="mt-2.5 block w-full rounded-xl border border-line-strong bg-white/[0.04] py-3 font-display text-sm text-[#eaf1ff]"
       >
         Back to today

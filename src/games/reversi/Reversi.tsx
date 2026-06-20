@@ -491,10 +491,10 @@ export function Reversi({
       <div
         role="grid"
         aria-label="Reversi board, 8 by 8"
-        className="grid aspect-square w-full grid-cols-8 rounded-2xl border p-1.5"
+        className="grid aspect-square w-full grid-cols-8 rounded-2xl border p-1"
         style={{
           maxWidth: BOARD_MAX,
-          gap: "clamp(2px, 0.8vw, 3px)",
+          gap: "clamp(2px, 0.7vw, 3px)",
           background: `${ACCENT.solid}1a`,
           borderColor: `${ACCENT.solid}3d`,
           boxShadow: `0 18px 50px -22px ${ACCENT.solid}59, inset 0 0 40px -30px ${ACCENT.solid}`,
