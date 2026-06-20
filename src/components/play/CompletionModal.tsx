@@ -9,6 +9,7 @@ import { Confetti } from "@/components/play/Confetti";
 import { shareResultImage } from "@/lib/shareImage";
 import { useTierNav } from "@/components/play/DifficultyContext";
 import { DIFFICULTY_META } from "@/lib/difficulty";
+import { rankForScore } from "@/lib/rank";
 import { useToast } from "@/components/ui/Toast";
 import { cn } from "@/lib/cn";
 
@@ -58,6 +59,8 @@ export function CompletionModal({
   const toast = useToast();
   const nav = useTierNav();
   const tier = nav?.difficulty;
+  // Performance rank revealed on a win, from the normalised score (VIS-3).
+  const rank = won && nav?.lastScore != null ? rankForScore(nav.lastScore) : null;
   const tierShare = withTier(share, tier);
   // Offer the next tier from inside the modal on a win — it's where attention is.
   const showProgress = won && Boolean(tier);
@@ -82,6 +85,29 @@ export function CompletionModal({
       <h2 id="complete-title" className="mt-2 font-display text-3xl font-semibold text-ink">
         {title}
       </h2>
+
+      {rank && (
+        <div
+          className="mt-3 flex items-center justify-center gap-2.5"
+          aria-label={`Rank: ${rank.label}, tier ${rank.index + 1} of ${rank.total}`}
+        >
+          <span
+            className="rounded-pill px-2.5 py-1 font-mono text-[11px] font-semibold tracking-[0.08em] text-[#04060f]"
+            style={{ backgroundImage: `linear-gradient(118deg, ${accent.from}, ${accent.to})` }}
+          >
+            {rank.label.toUpperCase()}
+          </span>
+          <span className="flex items-center gap-1" aria-hidden>
+            {Array.from({ length: rank.total }, (_, i) => (
+              <span
+                key={i}
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ background: i <= rank.index ? accent.solid : "rgba(255,255,255,0.18)" }}
+              />
+            ))}
+          </span>
+        </div>
+      )}
 
       {statValue && (
         <>

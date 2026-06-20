@@ -9,7 +9,10 @@ import { ResetCountdown } from "./ResetCountdown";
 import { StatBox } from "@/components/ui/Card";
 import { useProgress, liveStreak } from "@/lib/progress";
 import { dateLabel, todayISO } from "@/lib/daily";
+import type { GameId, SkillDomain } from "@/lib/types";
 import { cn } from "@/lib/cn";
+
+const TOTAL_GAMES = 15;
 
 function fmtTime(ms: number): string {
   const s = Math.round(ms / 1000);
@@ -33,6 +36,15 @@ export function Hub() {
       .filter((t): t is number => typeof t === "number" && t > 0);
     if (!times.length) return "—";
     return fmtTime(times.reduce((a, b) => a + b, 0) / times.length);
+  }, [todayResults]);
+
+  // Cognitive domains exercised by the games completed today (VIS-4).
+  const domainsToday = useMemo(() => {
+    const set = new Set<SkillDomain>();
+    for (const id of Object.keys(todayResults)) {
+      GAME_METAS[id as GameId]?.skills.forEach((s) => set.add(s));
+    }
+    return [...set];
   }, [todayResults]);
 
   const weekday = new Date().toLocaleDateString("en-US", { weekday: "short" });
@@ -63,6 +75,70 @@ export function Hub() {
           <StatBox value={String(playedCount)} sub="/15" label="PLAYED TODAY" color="#00e5ff" />
           <StatBox value={avgSolve} label="AVG SOLVE" color="#86a3ff" />
           <StatBox value={streak > 0 ? "Active" : "—"} label="STATUS" color="#ff2bd6" />
+        </div>
+
+        {/* daily completion summary (VIS-4) */}
+        <div
+          className="mt-4 animate-rise rounded-2xl border p-5 sm:p-6"
+          style={{
+            borderColor: "rgba(0,229,255,0.18)",
+            background: "linear-gradient(120deg, rgba(0,229,255,.06), rgba(255,43,214,.05))",
+          }}
+        >
+          <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
+            <div>
+              <div className="font-mono text-[11px] tracking-[0.2em] text-cyan-soft">
+                TODAY&apos;S PROGRESS
+              </div>
+              <div className="mt-1.5 font-display text-[clamp(20px,3vw,26px)] font-semibold text-ink">
+                {playedCount >= TOTAL_GAMES
+                  ? "Clean sweep — all 15 done 🧹"
+                  : `${playedCount} / ${TOTAL_GAMES} completed`}
+              </div>
+            </div>
+            <div className="font-mono text-[11.5px] text-ink-mute">
+              {streak > 0 ? (
+                <>
+                  <span className="font-semibold text-amber">{streak}</span>-day streak
+                </>
+              ) : (
+                "Play one to start a streak"
+              )}
+            </div>
+          </div>
+
+          <div
+            className="mt-3 h-2 w-full overflow-hidden rounded-pill bg-white/[0.06]"
+            role="progressbar"
+            aria-valuenow={playedCount}
+            aria-valuemin={0}
+            aria-valuemax={TOTAL_GAMES}
+            aria-label="Games completed today"
+          >
+            <div
+              className="h-full rounded-pill transition-[width] duration-500"
+              style={{
+                width: `${(playedCount / TOTAL_GAMES) * 100}%`,
+                backgroundImage: "linear-gradient(90deg, #00e5ff, #ff2bd6)",
+              }}
+            />
+          </div>
+
+          {domainsToday.length > 0 && (
+            <div className="mt-3.5 flex flex-wrap items-center gap-1.5">
+              <span className="mr-0.5 font-mono text-[10px] tracking-[0.14em] text-ink-faint">
+                DOMAINS TODAY
+              </span>
+              {domainsToday.map((d) => (
+                <span
+                  key={d}
+                  className="rounded-pill border border-line bg-white/[0.03] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-soft"
+                >
+                  {d}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 

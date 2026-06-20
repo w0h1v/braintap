@@ -17,6 +17,8 @@ export interface TierNav {
   next: Difficulty | null;
   /** Switch the host to the next tier (no-op at the top tier). */
   goNext: () => void;
+  /** Normalised 0–100 score of the most recent completion, for the rank reveal. */
+  lastScore: number | null;
 }
 
 export const DifficultyContext = createContext<TierNav | null>(null);

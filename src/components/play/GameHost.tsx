@@ -119,6 +119,8 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   // Bumped on each win to (re)play the brief win-celebration beat.
   const [winBurst, setWinBurst] = useState(0);
+  // Normalised score of the most recent completion (drives the modal rank).
+  const [lastScore, setLastScore] = useState<number | null>(null);
   const initRef = useRef(false);
   useEffect(() => {
     if (!supportsDiff || !hydrated || initRef.current) return;
@@ -172,6 +174,7 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
       recordResult(gameId, dateISO, finalResult, !isArchive, activeDiff);
       // A short celebratory beat just before the game's completion modal rises.
       if (result.status === "won") setWinBurst((n) => n + 1);
+      setLastScore(typeof result.score === "number" ? result.score : null);
       void syncProgress();
     },
     [recordResult, gameId, dateISO, isArchive, activeDiff, supportsDiff, showHostTimer],
@@ -208,9 +211,10 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
             difficulty: activeDiff,
             next: nextTier,
             goNext: () => nextTier && setDifficulty(nextTier),
+            lastScore,
           }
         : null,
-    [activeDiff, nextTier],
+    [activeDiff, nextTier, lastScore],
   );
 
   // Keyboard nav across the (unlocked) tier tabs — automatic activation.
