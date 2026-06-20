@@ -15,8 +15,7 @@ import {
 
 const ACCENT = GAME_METAS.teasers.accent;
 const TITLE = GAME_METAS.teasers.name;
-const INSIGHT =
-  "Lateral-thinking riddles force your brain off its well-worn associative paths, strengthening the cognitive flexibility that powers creative problem-solving.";
+const INSIGHT = GAME_METAS.teasers.insight;
 
 const CORRECT = "#7CF5C4";
 const WRONG = "#ff5a7c";

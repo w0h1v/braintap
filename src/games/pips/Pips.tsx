@@ -27,8 +27,7 @@ import {
 export const MAX_HINTS = 3;
 
 const ACCENT = GAME_METAS.pips.accent;
-const INSIGHT =
-  "Domino logic exercises constraint satisfaction — the prefrontal cortex juggles several rules at once while it searches for the one arrangement that fits them all.";
+const INSIGHT = GAME_METAS.pips.insight;
 
 const MATCH = "#7CF5C4"; // column total equals target
 const OVER = "#ff6b9d"; // column total exceeds target

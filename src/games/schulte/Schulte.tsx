@@ -20,8 +20,7 @@ import {
 } from "./engine";
 
 const ACCENT = GAME_METAS.schulte.accent;
-const INSIGHT =
-  "Schulte tables train peripheral vision and visual attention — keeping your eyes fixed on the centre while the numbers are found widens your useful field of view.";
+const INSIGHT = GAME_METAS.schulte.insight;
 
 // Mint feedback for found cells (warmer than the cyan accent so progress reads).
 const TAPPED_BG = "rgba(124,245,196,0.22)";

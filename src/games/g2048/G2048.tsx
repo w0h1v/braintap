@@ -22,8 +22,7 @@ import {
 } from "./engine";
 
 const ACCENT = GAME_METAS.g2048.accent;
-const INSIGHT =
-  "Sliding-tile games blend spatial planning with arithmetic — you're running a constant cost-benefit search several moves ahead, a workout for the brain's executive-function network.";
+const INSIGHT = GAME_METAS.g2048.insight;
 
 /** Animation timing (ms). Slide first, then the spawn/merge accents land. */
 const SLIDE_MS = 120;

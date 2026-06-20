@@ -121,6 +121,8 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
   const [winBurst, setWinBurst] = useState(0);
   // Normalised score of the most recent completion (drives the modal rank).
   const [lastScore, setLastScore] = useState<number | null>(null);
+  // Pre-game brain-insight teaser, dismissible for the session (VIS-5).
+  const [teaserDismissed, setTeaserDismissed] = useState(false);
   const initRef = useRef(false);
   useEffect(() => {
     if (!supportsDiff || !hydrated || initRef.current) return;
@@ -263,6 +265,28 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
       {isArchive && (
         <div className="mb-4 rounded-xl border border-amber/30 bg-amber/[0.06] px-4 py-2 text-center font-mono text-[11px] text-amber-soft">
           Archive puzzle · {dateLabel(dateISO)} — does not affect your streak
+        </div>
+      )}
+
+      {/* Pre-game brain-insight teaser (lead clause only; the full insight is
+          the completion payoff). Dismissible for the session. */}
+      {!teaserDismissed && (
+        <div
+          className="mb-4 flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5"
+          style={{ borderColor: `${meta.accent.solid}2e`, background: `${meta.accent.solid}0f` }}
+        >
+          <span aria-hidden className="mt-px text-[13px]">🧠</span>
+          <span className="flex-1 text-[12.5px] leading-snug text-ink-soft">
+            {meta.insight.split(/\s*[—;]\s*/)[0]}
+          </span>
+          <button
+            type="button"
+            onClick={() => setTeaserDismissed(true)}
+            aria-label="Dismiss insight"
+            className="-mr-1 shrink-0 rounded-md px-1.5 text-base leading-none text-ink-faint transition-colors hover:text-ink"
+          >
+            ×
+          </button>
         </div>
       )}
 

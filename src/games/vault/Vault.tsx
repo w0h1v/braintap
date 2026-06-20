@@ -19,8 +19,7 @@ import {
 } from "./engine";
 
 const ACCENT = GAME_METAS.vault.accent;
-const INSIGHT =
-  "Most people hold only about four items in working memory at once; practising spatial-pattern recall gradually nudges that ceiling upward.";
+const INSIGHT = GAME_METAS.vault.insight;
 
 const GOOD = "#7cf5c4";
 const BAD = "#ff5a7c";

@@ -26,8 +26,7 @@ export const MAX_HINTS = 3;
 const HINT_PENALTY = 5;
 
 const ACCENT = GAME_METAS.weaver.accent;
-const INSIGHT =
-  "Hunting for words from a fixed set of letters exercises your brain's lexical retrieval network — the same word-finding circuitry that keeps verbal fluency sharp with age.";
+const INSIGHT = GAME_METAS.weaver.insight;
 
 const ERROR_TEXT: Record<SubmitError, string> = {
   short: "Too short — 4+ letters",

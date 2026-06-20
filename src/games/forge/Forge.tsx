@@ -24,8 +24,7 @@ import {
 const ACCENT = GAME_METAS.forge.accent;
 export const MAX_HINTS = 3;
 const HINT_PENALTY = 8;
-const INSIGHT =
-  "Nonograms recruit the parietal lobe's spatial reasoning while your working memory juggles overlapping row and column constraints — deduction made visual.";
+const INSIGHT = GAME_METAS.forge.insight;
 
 interface ForgeState {
   cells: Cell[]; // length CELLS, 0/1/2

@@ -26,8 +26,7 @@ import {
 } from "./engine";
 
 const ACCENT = GAME_METAS.slide.accent;
-const INSIGHT =
-  "Sliding puzzles build mental rotation and look-ahead planning — you simulate moves in your mind's eye before committing, the same spatial machinery that maps a city or packs a suitcase.";
+const INSIGHT = GAME_METAS.slide.insight;
 
 // Fluid board sizing shared by every full-width row so nothing overflows at 360px.
 const BOARD_W = "min(92vw, 360px)";

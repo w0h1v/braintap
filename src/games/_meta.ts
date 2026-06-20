@@ -26,6 +26,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.cyan,
     skills: ["verbal", "logic"],
     icon: "connections",
+    insight:
+      "Sorting sixteen terms into four hidden groups exercises semantic memory and cognitive flexibility — your brain forms, tests and discards category hypotheses until the connections click.",
   },
   brainle: {
     id: "brainle",
@@ -36,6 +38,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.magenta,
     skills: ["verbal"],
     icon: "brainle",
+    insight:
+      "Each guess prunes a vast search space — your brain runs a Bayesian update, narrowing the possibilities with every clue, the same way it predicts the world.",
   },
   strands: {
     id: "strands",
@@ -46,6 +50,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.peri,
     skills: ["verbal", "focus"],
     icon: "strands",
+    insight:
+      "Tracing themed words through a letter grid blends lexical retrieval with visual search — your vocabulary network and spatial attention working in tandem.",
   },
   forge: {
     id: "forge",
@@ -56,6 +62,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.amber,
     skills: ["logic", "spatial"],
     icon: "forge",
+    insight:
+      "Nonograms recruit the parietal lobe's spatial reasoning while your working memory juggles overlapping row and column constraints — deduction made visual.",
   },
   weaver: {
     id: "weaver",
@@ -66,6 +74,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.mint,
     skills: ["verbal"],
     icon: "weaver",
+    insight:
+      "Hunting for words from a fixed set of letters exercises your brain's lexical retrieval network — the same word-finding circuitry that keeps verbal fluency sharp with age.",
   },
   vault: {
     id: "vault",
@@ -76,6 +86,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.cyan,
     skills: ["memory"],
     icon: "vault",
+    insight:
+      "Most people hold only about four items in working memory at once; practising spatial-pattern recall gradually nudges that ceiling upward.",
   },
   teasers: {
     id: "teasers",
@@ -86,6 +98,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.magenta,
     skills: ["logic", "verbal"],
     icon: "teasers",
+    insight:
+      "Lateral-thinking riddles force your brain off its well-worn associative paths, strengthening the cognitive flexibility that powers creative problem-solving.",
   },
   sudoku: {
     id: "sudoku",
@@ -96,6 +110,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.violet,
     skills: ["logic", "numeric"],
     icon: "sudoku",
+    insight:
+      "Sudoku leans on working memory and deductive logic — you hold candidate numbers in mind while systematically ruling out the impossible.",
   },
   sprint: {
     id: "sprint",
@@ -106,6 +122,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.mint,
     skills: ["numeric", "focus"],
     icon: "sprint",
+    insight:
+      "Fast mental arithmetic trains processing speed and your brain's approximate number system — the circuitry that estimates quantities at a glance.",
   },
   pips: {
     id: "pips",
@@ -116,6 +134,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.orange,
     skills: ["logic", "numeric"],
     icon: "pips",
+    insight:
+      "Domino logic exercises constraint satisfaction — the prefrontal cortex juggles several rules at once while it searches for the one arrangement that fits them all.",
   },
   g2048: {
     id: "g2048",
@@ -126,6 +146,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.violet,
     skills: ["numeric", "spatial"],
     icon: "g2048",
+    insight:
+      "Sliding-tile games blend spatial planning with arithmetic — you're running a constant cost-benefit search several moves ahead, a workout for the brain's executive-function network.",
   },
   schulte: {
     id: "schulte",
@@ -136,6 +158,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.cyan,
     skills: ["focus"],
     icon: "schulte",
+    insight:
+      "Schulte tables train peripheral vision and visual attention — keeping your eyes fixed on the centre while the numbers are found widens your useful field of view.",
   },
   simon: {
     id: "simon",
@@ -146,6 +170,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.magenta,
     skills: ["memory", "focus"],
     icon: "simon",
+    insight:
+      "Repeating a growing sequence taxes your phonological loop and spatial sketchpad at once — the two scratchpads of working memory — and chunking the pattern into groups is how experts push past seven.",
   },
   slide: {
     id: "slide",
@@ -156,6 +182,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.cyan,
     skills: ["spatial", "logic"],
     icon: "slide",
+    insight:
+      "Sliding puzzles build mental rotation and look-ahead planning — you simulate moves in your mind's eye before committing, the same spatial machinery that maps a city or packs a suitcase.",
   },
   reversi: {
     id: "reversi",
@@ -166,6 +194,8 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     accent: ACCENTS.mint,
     skills: ["logic", "spatial"],
     icon: "reversi",
+    insight:
+      "Territory games train look-ahead and inhibition — resisting the move that flips the most discs now in favour of the corner that wins the board later.",
   },
 };
 

@@ -55,6 +55,8 @@ export interface GameMeta {
   skills: SkillDomain[];
   /** Icon key resolved by the shared GameIcon component. */
   icon: GameId;
+  /** One-paragraph brain-science insight: shown on completion, teased pre-game. */
+  insight: string;
 }
 
 /** Outcome of a single completed (or abandoned) daily play. */

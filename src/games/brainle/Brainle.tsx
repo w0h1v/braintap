@@ -28,8 +28,7 @@ function maxRowsOf(puzzle: BrainlePuzzle): number {
 }
 
 const ACCENT = GAME_METAS.brainle.accent;
-const INSIGHT =
-  "Each guess prunes a vast search space — your brain runs a Bayesian update, narrowing the possibilities with every clue, the same way it predicts the world.";
+const INSIGHT = GAME_METAS.brainle.insight;
 
 // Tile colours per verdict (Wordle-standard, brain-themed cyan/amber palette).
 const VERDICT_BG: Record<Verdict, string> = {

@@ -24,8 +24,7 @@ import {
 } from "./engine";
 
 const ACCENT = GAME_METAS.simon.accent;
-const INSIGHT =
-  "Repeating a growing sequence taxes your phonological loop and spatial sketchpad at once — the two scratchpads of working memory — and chunking the pattern into groups is how experts push past seven.";
+const INSIGHT = GAME_METAS.simon.insight;
 
 /** Pad corner radii to make the 2×2 grid read as one rounded square. */
 const PAD_RADIUS = ["22px 8px 8px 8px", "8px 22px 8px 8px", "8px 8px 8px 22px", "8px 8px 22px 8px"];

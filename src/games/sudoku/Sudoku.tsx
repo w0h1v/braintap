@@ -24,8 +24,7 @@ import {
 const ACCENT = GAME_METAS.sudoku.accent;
 export const MAX_HINTS = 3;
 const HINT_PENALTY = 8;
-const INSIGHT =
-  "Sudoku leans on working memory and deductive logic — you hold candidate numbers in mind while systematically ruling out the impossible.";
+const INSIGHT = GAME_METAS.sudoku.insight;
 
 const CONFLICT = "#ff6b9d";
 const SAME = "#00e5ff";

@@ -23,8 +23,7 @@ import {
 } from "./engine";
 
 const ACCENT = GAME_METAS.sprint.accent;
-const INSIGHT =
-  "Fast mental arithmetic trains processing speed and your brain's approximate number system — the circuitry that estimates quantities at a glance.";
+const INSIGHT = GAME_METAS.sprint.insight;
 
 interface SprintState {
   /** Live grid digits. */

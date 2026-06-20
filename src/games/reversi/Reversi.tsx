@@ -35,8 +35,7 @@ import {
 } from "./engine";
 
 const ACCENT = GAME_METAS.reversi.accent;
-const INSIGHT =
-  "Territory games train look-ahead and inhibition — resisting the move that flips the most discs now in favour of the corner that wins the board later.";
+const INSIGHT = GAME_METAS.reversi.insight;
 
 // Disc accents (cyan = you, magenta = AI) live alongside the game's mint accent.
 const YOU_SOLID = "#00e5ff";
