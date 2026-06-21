@@ -10,6 +10,9 @@ import { formatClock } from "@/lib/share";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useEntitlement } from "@/lib/entitlement";
+import { adsAvailable, showRewardedAd } from "@/lib/ads";
+import { getMonetizationConfig } from "@/lib/config";
 import {
   cellsFor,
   sizeOf,
@@ -59,6 +62,7 @@ export function Slide({
 }: GameComponentProps<SlidePuzzle, SlideState>) {
   // Grid size is driven by the difficulty the host selects, via the puzzle.
   // Fall back to inferring it from the board for legacy puzzles without a size.
+  const { isPremium } = useEntitlement();
   const size = puzzle.size ?? sizeOf(puzzle.start);
   const cells = cellsFor(size);
   const lastTile = cells - 1; // highest tile value (== cells - 1)
@@ -85,6 +89,8 @@ export function Slide({
   const hintsUsedRef = useRef(hintsUsed);
   hintsUsedRef.current = hintsUsed;
   const hintTimerRef = useRef<number | null>(null);
+  // Guards the rewarded-ad hint flow against re-entrancy while an ad is showing.
+  const adInFlightRef = useRef(false);
 
   // Lower bound on remaining moves (used for the share/stat efficiency hint).
   const optimalLB = useMemo(() => manhattan(puzzle.start, size), [puzzle.start, size]);
@@ -207,9 +213,19 @@ export function Slide({
 
   // Hint: compute a sensible next move (pure helper), highlight it, then auto-make
   // it after a short beat so the player sees which tile moved. Deducts score.
-  const useHint = useCallback(() => {
+  const useHint = useCallback(async () => {
     if (won || completedRef.current) return;
     if (hintsUsedRef.current >= MAX_HINTS) return;
+    // MON-1: past the free threshold, a non-premium native user earns the hint
+    // by watching a rewarded ad. Inert on web (adsAvailable() is false), so the
+    // hint behaves exactly as before there. Ad fail → no hint, no penalty.
+    if (adsAvailable() && !isPremium && hintsUsedRef.current >= getMonetizationConfig().freeHintThreshold) {
+      if (adInFlightRef.current) return; // ignore taps while a rewarded ad is in flight
+      adInFlightRef.current = true;
+      const r = await showRewardedAd();
+      adInFlightRef.current = false;
+      if (r !== "rewarded") return;
+    }
     const cell = nextBestMove(board, -1, size);
     if (cell < 0 || !canMove(board, cell, size)) return;
 
@@ -227,7 +243,7 @@ export function Slide({
         slideAt(cell);
       }, 420);
     }
-  }, [won, board, reducedMotion, slideAt, size]);
+  }, [won, board, reducedMotion, slideAt, size, isPremium]);
 
   // Keyboard: arrow keys slide the tile from that direction into the blank.
   // Tab focus + Enter/Space activates the focused tile.

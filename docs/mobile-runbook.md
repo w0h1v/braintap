@@ -38,14 +38,27 @@ npx cap add android   # needs Android Studio / SDK
 ```
 Then re-type `capacitor.config.ts`'s export to `CapacitorConfig` from `@capacitor/cli`.
 
-### 2. Make the static export build (MOB-1)
-`npm run build:mobile` flips `output: "export"`. Before it will succeed you must
-export-guard the server-only routes (they don't exist on-device):
-- `src/app/play/[game]/opengraph-image.tsx`, `twitter-image.tsx`, root
-  `opengraph-image`/`twitter-image` — drop or guard from the export (web-only).
-- `src/app/auth/callback` — web-only OAuth; excluded from the app build.
-- `/play/[game]` already has `generateStaticParams`.
-Then `npx cap sync` to copy `out/` + plugins into both platforms.
+### 2. Make the static export build (MOB-1) — PARTIALLY DONE
+`npm run build:mobile` now runs `scripts/build-mobile.mjs`, which temporarily
+moves the export-incompatible web-only files out of the tree, runs the export
+(`BUILD_TARGET=mobile` → `output: "export"`), then restores them. The web build
+(`npm run build`) is completely unaffected. It already clears the first layer of
+blockers by excluding: `src/middleware.ts`, `src/app/auth/callback`, and the four
+OG/Twitter image routes (`compiled successfully` past all of those).
+
+REMAINING (a real static-export conversion — needs the mobile-auth + routing
+calls; intentionally NOT done autonomously since it changes the live web flow):
+- `src/app/play/[game]/page.tsx` reads `searchParams.date` server-side (the
+  archive `?date=` param), which `output: "export"` forbids. Refactor so the
+  date is read CLIENT-side — have `GameHost` read it via `useSearchParams()`
+  instead of the `dateParam` server prop, and move the date-keyed remount
+  client-side. This touches the live web archive flow, so re-verify it after.
+- Re-run `npm run build:mobile` and resolve any further dynamic-rendering
+  blockers it surfaces (the export errors per page, so they appear one layer at
+  a time).
+- Native auth: the excluded web OAuth callback is replaced by a native
+  deep-link flow (the app does not use `/auth/callback`).
+Once `out/` builds, `npx cap sync` copies it + plugins into both platforms.
 
 ### 3. Wire entitlement to RevenueCat (MON-3)
 In `src/lib/entitlement.tsx`, replace the web-inert body with a RevenueCat

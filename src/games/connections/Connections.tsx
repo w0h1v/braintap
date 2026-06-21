@@ -9,6 +9,9 @@ import { HintButton } from "@/components/play/HintButton";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useEntitlement } from "@/lib/entitlement";
+import { adsAvailable, showRewardedAd } from "@/lib/ads";
+import { getMonetizationConfig } from "@/lib/config";
 import {
   GROUP_COUNT,
   GROUP_SIZE,
@@ -76,6 +79,7 @@ export function Connections({
   reducedMotion,
 }: GameComponentProps<ConnectionsPuzzle, ConnectionsState>) {
   const saved = savedState ?? null;
+  const { isPremium } = useEntitlement();
 
   const [remaining, setRemaining] = useState<string[]>(
     () => saved?.remaining ?? puzzle.tiles.slice(),
@@ -107,6 +111,8 @@ export function Connections({
   const tileRefs = useRef<(HTMLButtonElement | null)[]>([]);
   /** True only after a real key press, so we don't yank focus on mount/touch. */
   const keyboardActive = useRef(false);
+  /** Guards the rewarded-ad hint flow against re-entrancy while an ad is showing. */
+  const adInFlightRef = useRef(false);
 
   /** Number of columns in the tile grid (matches grid-cols-4). */
   const GRID_COLS = 4;
@@ -319,8 +325,18 @@ export function Connections({
     haptics.tap();
   }, [gameOver, selected.length]);
 
-  const useHint = useCallback(() => {
+  const useHint = useCallback(async () => {
     if (gameOver || hintsUsed >= MAX_HINTS) return;
+    // MON-1: past the free threshold, a non-premium native user earns the hint
+    // by watching a rewarded ad. Inert on web (adsAvailable() is false), so the
+    // hint behaves exactly as before there. Ad fail → no hint, no penalty.
+    if (adsAvailable() && !isPremium && hintsUsed >= getMonetizationConfig().freeHintThreshold) {
+      if (adInFlightRef.current) return; // ignore taps while a rewarded ad is in flight
+      adInFlightRef.current = true;
+      const r = await showRewardedAd();
+      adInFlightRef.current = false;
+      if (r !== "rewarded") return;
+    }
     const gi = getHint(puzzle, solvedOrder);
     if (gi < 0) return; // nothing left to reveal
 
@@ -355,6 +371,7 @@ export function Connections({
     mistakes,
     finish,
     flash,
+    isPremium,
   ]);
 
   // Keyboard: Enter submits, Escape / Backspace deselects.
