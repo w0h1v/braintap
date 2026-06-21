@@ -197,6 +197,66 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
     insight:
       "Territory games train look-ahead and inhibition — resisting the move that flips the most discs now in favour of the corner that wins the board later.",
   },
+  crossword: {
+    id: "crossword",
+    name: "Mini Crossword",
+    tagline: "Fill the mini grid from across and down clues — a daily test of word recall.",
+    category: "VERBAL · CROSSWORD",
+    estMinutes: 4,
+    accent: ACCENTS.peri,
+    skills: ["verbal", "memory"],
+    icon: "crossword",
+    insight:
+      "Reconstructing words from definitional clues exercises semantic memory and the brain's word-retrieval network — the same \"tip-of-the-tongue\" circuitry that keeps verbal fluency sharp with age.",
+  },
+  matrix: {
+    id: "matrix",
+    name: "Pattern Matrix",
+    tagline: "Read the hidden rules across the 3×3 grid, then pick the tile that completes it.",
+    category: "LOGIC · MATRIX",
+    estMinutes: 3,
+    accent: ACCENTS.peri,
+    skills: ["logic", "spatial"],
+    icon: "matrix",
+    insight:
+      "Abstract matrix reasoning is the purest lab measure of fluid intelligence — your brain induces hidden rules from sparse examples, the same inductive engine behind learning anything new.",
+  },
+  stroop: {
+    id: "stroop",
+    name: "Stroop Rush",
+    tagline: "Tap the ink colour, not the word. Beat the clock without slipping.",
+    category: "FOCUS · SPEED",
+    estMinutes: 2,
+    accent: ACCENTS.magenta,
+    skills: ["focus", "logic"],
+    icon: "stroop",
+    insight:
+      "Reading is so automatic that naming the ink of a mismatched colour word forces your prefrontal cortex to override the reflex — the classic measure of inhibitory control and selective attention.",
+  },
+  mathsprint: {
+    id: "mathsprint",
+    name: "Mental Math Sprint",
+    tagline: "Solve as many rapid-fire arithmetic problems as you can before the clock runs out.",
+    category: "NUMBER · SPEED",
+    estMinutes: 2,
+    accent: ACCENTS.amber,
+    skills: ["numeric", "focus"],
+    icon: "mathsprint",
+    insight:
+      "Rapid single-fact arithmetic drills the brain's fact-retrieval circuits and processing speed, shifting effortful calculation toward instant recall — the automaticity that frees working memory for harder thinking.",
+  },
+  spotchange: {
+    id: "spotchange",
+    name: "Spot the Change",
+    tagline: "Memorize the grid, then spot the one cell that changed.",
+    category: "MEMORY · SPATIAL",
+    estMinutes: 2,
+    accent: ACCENTS.orange,
+    skills: ["memory", "spatial"],
+    icon: "spotchange",
+    insight:
+      "Visual working memory holds only a handful of object-feature bindings at once, so spotting the single changed cell forces your brain to compare a stored snapshot against the present scene — the core of everyday change-detection.",
+  },
 };
 
 /** Display order on the hub grid (matches the prototype). */
@@ -216,6 +276,11 @@ export const GAME_ORDER: GameId[] = [
   "simon",
   "slide",
   "reversi",
+  "crossword",
+  "matrix",
+  "stroop",
+  "mathsprint",
+  "spotchange",
 ];
 
 /** Weekly rotation (highlighted "featured" game per weekday). */

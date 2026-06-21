@@ -124,6 +124,55 @@ export function GameIcon({ id, size = 22 }: { id: GameId; size?: number }) {
           <circle cx="9" cy="15" r="2.4" fill="currentColor" opacity=".7" />
         </svg>
       );
+    case "crossword":
+      return (
+        <svg {...p}>
+          <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M9.3 4v16M14.6 4v16M4 9.3h16M4 14.6h16" stroke="currentColor" strokeWidth="1" opacity=".35" />
+          <rect x="4" y="4" width="5.3" height="5.3" fill="currentColor" opacity=".22" />
+          <rect x="14.6" y="14.6" width="5.4" height="5.4" fill="currentColor" opacity=".22" />
+        </svg>
+      );
+    case "matrix":
+      return (
+        <svg {...p}>
+          <circle cx="6" cy="6" r="2" fill="currentColor" opacity=".9" />
+          <circle cx="12" cy="6" r="2" fill="currentColor" opacity=".9" />
+          <circle cx="18" cy="6" r="2" fill="currentColor" opacity=".9" />
+          <circle cx="6" cy="12" r="2" fill="currentColor" opacity=".65" />
+          <circle cx="12" cy="12" r="2" fill="currentColor" opacity=".65" />
+          <circle cx="18" cy="12" r="2" fill="currentColor" opacity=".65" />
+          <circle cx="6" cy="18" r="2" fill="currentColor" opacity=".45" />
+          <circle cx="12" cy="18" r="2" fill="currentColor" opacity=".45" />
+          <rect x="15.8" y="15.8" width="4.4" height="4.4" rx="1" stroke="currentColor" strokeWidth="1.4" />
+        </svg>
+      );
+    case "stroop":
+      return (
+        <svg {...p}>
+          <rect x="3" y="6" width="13" height="6.5" rx="2" fill="currentColor" opacity=".4" />
+          <rect x="8" y="11.5" width="13" height="6.5" rx="2" fill="currentColor" opacity=".85" />
+        </svg>
+      );
+    case "mathsprint":
+      return (
+        <svg {...p}>
+          <path d="M6 6.5h5M8.5 4v5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          <path d="M14 5l4 4M18 5l-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" opacity=".75" />
+          <path d="M6 16.5h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" opacity=".55" />
+          <circle cx="16" cy="14.4" r="1.1" fill="currentColor" opacity=".75" />
+          <path d="M13.5 17h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" opacity=".75" />
+          <circle cx="16" cy="19.6" r="1.1" fill="currentColor" opacity=".75" />
+        </svg>
+      );
+    case "spotchange":
+      return (
+        <svg {...p}>
+          <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" strokeWidth="1.4" />
+          <path d="M9 3v18M15 3v18M3 9h18M3 15h18" stroke="currentColor" strokeWidth="0.9" opacity=".3" />
+          <circle cx="16.5" cy="7.5" r="2.1" fill="currentColor" />
+        </svg>
+      );
     default:
       return null;
   }
