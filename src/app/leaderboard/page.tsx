@@ -33,13 +33,6 @@ function fmtTime(ms?: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-/** Sample discussion threads (static / offline-safe). */
-const DISCUSSIONS = [
-  { title: "Best Theta vs sleep-onset strategy?", tag: "strategy", replies: 248 },
-  { title: "Today's Connections purple group was brutal", tag: "connections", replies: 176 },
-  { title: "Schulte under 18s — share your scan pattern", tag: "focus", replies: 94 },
-];
-
 /** Animated count-up that eases toward `target`. Respects reduced motion. */
 function useCountUp(target: number, durationMs = 1400): number {
   const [value, setValue] = useState(0);
@@ -425,27 +418,23 @@ export default function LeaderboardPage() {
             )}
           </div>
 
-          {/* discussion */}
+          {/* discussion — coming soon (no fabricated threads) */}
           <div>
             <div className="mb-3 font-mono text-[11px] tracking-[0.2em] text-ink-mute">
               DISCUSSION
             </div>
-            <div className="flex flex-col gap-3">
-              {DISCUSSIONS.map((d) => (
-                <Card
-                  key={d.title}
-                  className="cursor-pointer p-5 transition-colors hover:border-cyan/30"
-                >
-                  <div className="font-display text-base font-semibold text-ink">
-                    {d.title}
-                  </div>
-                  <div className="mt-2 font-mono text-[11px] text-ink-mute">
-                    <span className="text-cyan-soft">#{d.tag}</span> ·{" "}
-                    {d.replies} replies
-                  </div>
-                </Card>
-              ))}
-            </div>
+            <Card className="p-6 text-center">
+              <div className="text-xl" aria-hidden>
+                💬
+              </div>
+              <div className="mt-2 font-display text-base font-semibold text-ink">
+                Discussion is coming soon
+              </div>
+              <p className="mx-auto mt-1.5 max-w-[280px] text-sm leading-relaxed text-ink-mute">
+                Compare strategies and times with other players once the community
+                opens up.
+              </p>
+            </Card>
           </div>
         </div>
       </section>

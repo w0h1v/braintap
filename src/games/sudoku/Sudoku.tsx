@@ -10,6 +10,9 @@ import { formatClock } from "@/lib/share";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useEntitlement } from "@/lib/entitlement";
+import { adsAvailable, showRewardedAd } from "@/lib/ads";
+import { getMonetizationConfig } from "@/lib/config";
 import {
   N,
   CELLS,
@@ -81,6 +84,7 @@ export function Sudoku({
   hostTimer = false,
 }: GameComponentProps<SudokuPuzzle, SudokuState>) {
   const saved = savedState ?? null;
+  const { isPremium } = useEntitlement();
   const [entries, setEntries] = useState<number[]>(
     () => saved?.entries ?? new Array(CELLS).fill(0),
   );
@@ -104,6 +108,8 @@ export function Sudoku({
   const [solving, setSolving] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const mistakesRef = useRef(0);
+  // Guards the rewarded-ad hint flow against re-entrancy while an ad is showing.
+  const adInFlightRef = useRef(false);
   const finalMsRef = useRef(saved?.won ? (saved?.elapsedMs ?? 0) : 0);
 
   // Undo/redo history (session-only). Each stack entry is a full board snapshot
@@ -321,8 +327,18 @@ export function Sudoku({
     haptics.tap();
   }, [won, selected, puzzle.given, entries, notes, pushHistory]);
 
-  const handleHint = useCallback(() => {
+  const handleHint = useCallback(async () => {
     if (won || hintsUsed >= MAX_HINTS) return;
+    // MON-1: past the free threshold, a non-premium native user earns the hint
+    // by watching a rewarded ad. Inert on web (adsAvailable() is false), so the
+    // hint behaves exactly as before there. Ad fail → no hint, no penalty.
+    if (adsAvailable() && !isPremium && hintsUsed >= getMonetizationConfig().freeHintThreshold) {
+      if (adInFlightRef.current) return; // ignore taps while a rewarded ad is in flight
+      adInFlightRef.current = true;
+      const r = await showRewardedAd();
+      adInFlightRef.current = false;
+      if (r !== "rewarded") return;
+    }
     const hint = getHint(grid, puzzle.solution);
     if (!hint) return;
     const { cell, value } = hint;
@@ -358,7 +374,7 @@ export function Sudoku({
       });
       return next;
     });
-  }, [won, hintsUsed, grid, puzzle, reducedMotion, tryComplete, pushHistory, flashUnits]);
+  }, [won, hintsUsed, grid, puzzle, reducedMotion, tryComplete, pushHistory, flashUnits, isPremium]);
 
   const move = useCallback((dr: number, dc: number) => {
     setSelected((cur) => {

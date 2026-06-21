@@ -20,6 +20,7 @@ import { useGameClock } from "@/lib/useGameClock";
 import { GameIcon } from "@/components/GameIcon";
 import { DifficultyContext } from "@/components/play/DifficultyContext";
 import { WinCelebration } from "@/components/play/WinCelebration";
+import { maybeInterstitial } from "@/lib/ads";
 import { cn } from "@/lib/cn";
 
 function fmtMs(ms: number): string {
@@ -243,6 +244,7 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
       <div className="mb-4 flex items-center justify-between gap-3">
         <Link
           href="/"
+          onClick={() => void maybeInterstitial("return-home")}
           className="flex items-center gap-2 rounded-xl border border-line-strong bg-white/[0.03] px-3 py-2 font-mono text-xs text-ink-soft transition-colors hover:text-ink"
         >
           ← Today
@@ -388,7 +390,7 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
         id={supportsDiff ? "tier-panel" : undefined}
         role={supportsDiff ? "tabpanel" : undefined}
         aria-labelledby={supportsDiff ? `tier-tab-${difficulty}` : undefined}
-        className="rounded-3xl border border-line bg-gradient-to-b from-[rgba(11,15,31,0.65)] to-[rgba(6,8,18,0.6)] p-4 sm:p-6"
+        className="rounded-3xl border border-line bg-gradient-to-b from-[rgba(11,15,31,0.65)] to-[rgba(6,8,18,0.6)] p-3 sm:p-6"
       >
         <DifficultyContext.Provider value={tierNav}>
           <GameComponent
@@ -429,7 +431,11 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
             </div>
           ) : null}
 
-          <Link href="/" className="font-mono text-xs text-cyan">
+          <Link
+            href="/"
+            onClick={() => void maybeInterstitial("return-home")}
+            className="font-mono text-xs text-cyan"
+          >
             Back to today&apos;s puzzles →
           </Link>
         </div>

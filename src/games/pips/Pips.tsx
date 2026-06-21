@@ -819,7 +819,7 @@ export function Pips({
                   onClick={() => flipDomino(id)}
                   disabled={won}
                   aria-label={`Flip tray domino ${left} and ${right}`}
-                  className="flex h-7 min-w-[44px] items-center justify-center rounded-full text-[13px] text-ink-soft outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-white/60"
+                  className="flex h-9 min-w-[44px] items-center justify-center rounded-full text-[13px] text-ink-soft outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-white/60"
                   style={{ background: "rgba(255,255,255,0.06)" }}
                 >
                   ↻
