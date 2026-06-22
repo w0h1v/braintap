@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { ALL_GAMES, GAME_METAS, ROTATION } from "@/lib/games";
+import { ALL_GAMES, GAME_METAS, ROTATION, GAME_COUNT, GAME_COUNT_WORD } from "@/lib/games";
 import { GAME_ORDER } from "@/games/_meta";
 import { GameCard } from "./GameCard";
 import { ResetCountdown } from "./ResetCountdown";
@@ -12,7 +12,7 @@ import { dateLabel, todayISO } from "@/lib/daily";
 import type { GameId, SkillDomain } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
-const TOTAL_GAMES = 15;
+const TOTAL_GAMES = GAME_COUNT;
 
 function fmtTime(ms: number): string {
   const s = Math.round(ms / 1000);
@@ -64,7 +64,7 @@ export function Hub() {
             <span className="bt-gradient-text">one puzzle a day.</span>
           </h1>
           <p className="mt-5 max-w-[520px] text-[17px] leading-relaxed text-ink-soft">
-            Fifteen science-backed brain games, one fresh challenge every day. Build a streak,
+            {GAME_COUNT_WORD} science-backed brain games, one fresh challenge every day. Build a streak,
             level up your cognition, and see your mind sharpen.
           </p>
         </div>
@@ -72,7 +72,7 @@ export function Hub() {
         {/* stat strip */}
         <div className="mt-10 grid animate-rise grid-cols-2 gap-3.5 sm:mt-11 md:grid-cols-4">
           <StatBox value={String(streak)} sub=" days" label="CURRENT STREAK" color="#ffb020" />
-          <StatBox value={String(playedCount)} sub="/15" label="PLAYED TODAY" color="#00e5ff" />
+          <StatBox value={String(playedCount)} sub={`/${TOTAL_GAMES}`} label="PLAYED TODAY" color="#00e5ff" />
           <StatBox value={avgSolve} label="AVG SOLVE" color="#86a3ff" />
           <StatBox value={streak > 0 ? "Active" : "—"} label="STATUS" color="#ff2bd6" />
         </div>
@@ -92,7 +92,7 @@ export function Hub() {
               </div>
               <div className="mt-1.5 font-display text-[clamp(20px,3vw,26px)] font-semibold text-ink">
                 {playedCount >= TOTAL_GAMES
-                  ? "Clean sweep — all 15 done 🧹"
+                  ? `Clean sweep — all ${TOTAL_GAMES} done 🧹`
                   : `${playedCount} / ${TOTAL_GAMES} completed`}
               </div>
             </div>
@@ -150,7 +150,7 @@ export function Hub() {
               TODAY&apos;S PUZZLES
             </div>
             <h2 className="mt-2 font-display text-[clamp(26px,3vw,38px)] font-semibold tracking-[-0.02em] text-ink">
-              Fifteen ready to play
+              {GAME_COUNT_WORD} ready to play
             </h2>
           </div>
           <div className="font-mono text-[11.5px] text-ink-mute">

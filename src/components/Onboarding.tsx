@@ -6,6 +6,7 @@ import { Modal } from "@/components/ui/Modal";
 import { useProgress } from "@/lib/progress";
 import { cn } from "@/lib/cn";
 import { GAME_METAS } from "@/games/_meta";
+import { GAME_COUNT } from "@/lib/games";
 import type { SkillDomain } from "@/lib/types";
 
 const ACCENT = GAME_METAS.connections.accent;
@@ -91,8 +92,8 @@ function StreakArt() {
 const SLIDES: Slide[] = [
   {
     eyebrow: "WELCOME TO BRAINTAP",
-    title: "15 games. Every day.",
-    body: "A fresh deck of 15 bite-sized brain games drops daily — from word puzzles to logic grids to memory tests. Same puzzles for everyone, reset at local midnight.",
+    title: `${GAME_COUNT} games. Every day.`,
+    body: `A fresh deck of ${GAME_COUNT} bite-sized brain games drops daily — from word puzzles to logic grids to memory tests. Same puzzles for everyone, reset at local midnight.`,
     art: DailyArt,
   },
   {

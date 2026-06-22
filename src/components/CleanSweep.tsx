@@ -6,11 +6,12 @@ import { useProgress } from "@/lib/progress";
 import { todayISO } from "@/lib/daily";
 import { shareText as doShare } from "@/lib/share";
 import { GAME_METAS } from "@/games/_meta";
+import { GAME_COUNT } from "@/lib/games";
 import { useToast } from "@/components/ui/Toast";
 import { cn } from "@/lib/cn";
 
 const ACCENT = GAME_METAS.weaver.accent;
-const TOTAL_GAMES = 15;
+const TOTAL_GAMES = GAME_COUNT;
 
 const STORAGE_PREFIX = "braintap-cleansweep-";
 
@@ -86,7 +87,11 @@ function Confetti() {
 }
 
 function shareLine() {
-  return `BrainTap · Clean Sweep! 🧹\nAll 15 games solved today.\n\n✅✅✅✅✅\n✅✅✅✅✅\n✅✅✅✅✅\nbraintap.app`;
+  // A check grid sized to the live game count (5 per row).
+  const grid = Array.from({ length: Math.ceil(GAME_COUNT / 5) }, (_, r) =>
+    "✅".repeat(Math.min(5, GAME_COUNT - r * 5)),
+  ).join("\n");
+  return `BrainTap · Clean Sweep! 🧹\nAll ${GAME_COUNT} games solved today.\n\n${grid}\nbraintap.app`;
 }
 
 export function CleanSweep() {

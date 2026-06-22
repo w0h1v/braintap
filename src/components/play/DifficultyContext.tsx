@@ -7,7 +7,7 @@ import type { Difficulty } from "@/lib/types";
  * Tier navigation for the currently-hosted game. Provided by GameHost (which
  * owns tier state) and consumed by CompletionModal so the completion card can
  * name the tier, tag the share text, and offer a "play the next tier" CTA —
- * without every one of the 15 games having to thread props down. `null` for
+ * without every game having to thread props down. `null` for
  * games that don't use tiers.
  */
 export interface TierNav {

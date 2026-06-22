@@ -49,6 +49,19 @@ export const GAME_MODULES: Record<GameId, AnyGameModule> = {
 /** All game modules in hub display order. */
 export const ALL_GAMES: AnyGameModule[] = GAME_ORDER.map((id) => GAME_MODULES[id]);
 
+/** Live count of playable games — the single source of truth for copy/stats. */
+export const GAME_COUNT = ALL_GAMES.length;
+
+const NUMBER_WORDS = [
+  "Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+  "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen",
+  "Seventeen", "Eighteen", "Nineteen", "Twenty", "Twenty-one", "Twenty-two",
+  "Twenty-three", "Twenty-four", "Twenty-five",
+] as const;
+
+/** Spelled-out capitalised game count for prose (e.g. "Twenty"); numeral fallback. */
+export const GAME_COUNT_WORD = NUMBER_WORDS[GAME_COUNT] ?? String(GAME_COUNT);
+
 export function getGame(id: string): AnyGameModule | undefined {
   return (GAME_MODULES as Record<string, AnyGameModule>)[id];
 }
