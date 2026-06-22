@@ -418,7 +418,13 @@ export function Forge({
               }}
             >
               {puzzle.colClues[c].map((n, k) => (
-                <span key={k}>{n}</span>
+                <span
+                  key={k}
+                  className="inline-flex items-center justify-center rounded-[3px] px-[3px]"
+                  style={{ background: `${ACCENT.solid}14` }}
+                >
+                  {n}
+                </span>
               ))}
             </div>
           ))}
@@ -606,7 +612,13 @@ function Row({
         }}
       >
         {puzzle.rowClues[r].map((n, k) => (
-          <span key={k}>{n}</span>
+          <span
+            key={k}
+            className="inline-flex items-center justify-center rounded-[3px] px-[3px]"
+            style={{ background: `${ACCENT.solid}14` }}
+          >
+            {n}
+          </span>
         ))}
       </div>
 
@@ -648,7 +660,7 @@ function Row({
                 ? FILL
                 : marked
                   ? "rgba(255,90,140,.08)"
-                  : "rgba(255,255,255,.04)",
+                  : `${ACCENT.solid}10`,
               border: filled
                 ? `1px solid ${FILL}`
                 : sel
