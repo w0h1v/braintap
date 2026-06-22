@@ -10,6 +10,9 @@ import { formatClock } from "@/lib/share";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useEntitlement } from "@/lib/entitlement";
+import { adsAvailable, showRewardedAd } from "@/lib/ads";
+import { getMonetizationConfig } from "@/lib/config";
 import {
   pairStart,
   halves,
@@ -186,6 +189,7 @@ export function Pips({
 }: GameComponentProps<PipsPuzzle, PipsState>) {
   // Board shape is read from the puzzle (difficulty-driven). Falls back to the
   // legacy 2×2 board for older puzzles that predate the `config` field.
+  const { isPremium } = useEntitlement();
   const cfg = useMemo(() => configOf(puzzle), [puzzle]);
   const COLS = colsFor(cfg);
   const SLOTS = slotsFor(cfg);
@@ -216,6 +220,8 @@ export function Pips({
   const [hintFlash, setHintFlash] = useState<number | null>(null);
   /** Keyboard-focused slot (0..3) for arrow navigation; refs drive real focus. */
   const slotRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  // Guards the rewarded-ad hint flow against re-entrancy while an ad is showing.
+  const adInFlightRef = useRef(false);
 
   const { slots, flips, won, moves, locked, hintsUsed } = state;
   const past = state.past ?? [];
@@ -470,8 +476,18 @@ export function Pips({
     });
   }, [won, puzzle.solution, DOMINOES, SLOTS]);
 
-  const useHint = useCallback(() => {
+  const useHint = useCallback(async () => {
     if (won || state.hintsUsed >= MAX_HINTS) return;
+    // MON-1: past the free threshold, a non-premium native user earns the hint
+    // by watching a rewarded ad. Inert on web (adsAvailable() is false), so the
+    // hint behaves exactly as before there. Ad fail → no hint, no penalty.
+    if (adsAvailable() && !isPremium && state.hintsUsed >= getMonetizationConfig().freeHintThreshold) {
+      if (adInFlightRef.current) return; // ignore taps while a rewarded ad is in flight
+      adInFlightRef.current = true;
+      const r = await showRewardedAd();
+      adInFlightRef.current = false;
+      if (r !== "rewarded") return;
+    }
     const hint = getHint(puzzle, { slots: state.slots, flips: state.flips });
     if (!hint) return; // nothing left to reveal
     setSelected(null);
@@ -498,7 +514,7 @@ export function Pips({
       hintsUsed: state.hintsUsed + 1,
       moves: state.moves + 1,
     });
-  }, [won, state, puzzle, applyAction, reducedMotion, SLOTS]);
+  }, [won, state, puzzle, applyAction, reducedMotion, SLOTS, isPremium]);
 
   // Move keyboard focus to a slot button (used by arrow-key navigation).
   const focusSlot = useCallback(

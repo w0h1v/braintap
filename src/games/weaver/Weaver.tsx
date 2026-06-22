@@ -8,6 +8,9 @@ import { HintButton } from "@/components/play/HintButton";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useEntitlement } from "@/lib/entitlement";
+import { adsAvailable, showRewardedAd } from "@/lib/ads";
+import { getMonetizationConfig } from "@/lib/config";
 import { Hive } from "./Hive";
 import {
   evaluateWord,
@@ -53,6 +56,7 @@ export function Weaver({
   reducedMotion,
 }: GameComponentProps<WeaverPuzzle, WeaverState>) {
   const saved = savedState ?? null;
+  const { isPremium } = useEntitlement();
   const hive = useMemo(() => hiveLetters(puzzle), [puzzle]);
 
   // Backward-compatible reads of saved state: older or cross-tier saves may hold
@@ -115,6 +119,8 @@ export function Weaver({
   const completedRef = useRef(saved?.won ?? false);
   const hintsRef = useRef(hintsUsed);
   hintsRef.current = hintsUsed;
+  // Guards the rewarded-ad hint flow against re-entrancy while an ad is showing.
+  const adInFlightRef = useRef(false);
   // Solve-time stopwatch. Weaver shows no clock chip (the host owns the unified
   // timer when hostTimer is set), but we still measure wall-clock time so the
   // result can report timeMs. Started lazily on the first interaction.
@@ -298,8 +304,18 @@ export function Weaver({
     }
   }, [reducedMotion]);
 
-  const useHint = useCallback(() => {
+  const useHint = useCallback(async () => {
     if (hintsRef.current >= MAX_HINTS) return;
+    // MON-1: past the free threshold, a non-premium native user earns the hint
+    // by watching a rewarded ad. Inert on web (adsAvailable() is false), so the
+    // hint behaves exactly as before there. Ad fail → no hint, no penalty.
+    if (adsAvailable() && !isPremium && hintsRef.current >= getMonetizationConfig().freeHintThreshold) {
+      if (adInFlightRef.current) return; // ignore taps while a rewarded ad is in flight
+      adInFlightRef.current = true;
+      const r = await showRewardedAd();
+      adInFlightRef.current = false;
+      if (r !== "rewarded") return;
+    }
     const hint = getHint(puzzle, foundSet);
     if (!hint) return;
 
@@ -326,7 +342,7 @@ export function Weaver({
       }
       return next;
     });
-  }, [puzzle, foundSet, showFlash, reducedMotion, finish, hive, goal, startClock]);
+  }, [puzzle, foundSet, showFlash, reducedMotion, finish, hive, goal, startClock, isPremium]);
 
   // Keyboard support.
   useEffect(() => {
