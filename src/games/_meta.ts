@@ -128,7 +128,7 @@ export const GAME_METAS: Record<GameId, GameMeta> = {
   pips: {
     id: "pips",
     name: "Pips",
-    tagline: "Place and flip dominoes so every column's pips add up to its target.",
+    tagline: "Lay dominoes across the board so every coloured region meets its rule.",
     category: "NUMBER · DOMINOES",
     estMinutes: 3,
     accent: ACCENTS.orange,
