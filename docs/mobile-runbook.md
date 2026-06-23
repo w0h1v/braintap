@@ -38,14 +38,22 @@ npx cap add android   # needs Android Studio / SDK
 ```
 Then re-type `capacitor.config.ts`'s export to `CapacitorConfig` from `@capacitor/cli`.
 
-### 2. Make the static export build (MOB-1)
-`npm run build:mobile` flips `output: "export"`. Before it will succeed you must
-export-guard the server-only routes (they don't exist on-device):
-- `src/app/play/[game]/opengraph-image.tsx`, `twitter-image.tsx`, root
-  `opengraph-image`/`twitter-image` — drop or guard from the export (web-only).
-- `src/app/auth/callback` — web-only OAuth; excluded from the app build.
-- `/play/[game]` already has `generateStaticParams`.
-Then `npx cap sync` to copy `out/` + plugins into both platforms.
+### 2. Make the static export build (MOB-1) — DONE (`out/` builds)
+`npm run build:mobile` runs `scripts/build-mobile.mjs`: it temporarily moves the
+export-incompatible web-only files out (`src/middleware.ts`, `src/app/auth/callback`,
+the four OG/Twitter image routes), runs the export (`BUILD_TARGET=mobile` →
+`output: "export"`), then restores them. It now produces a complete `out/` with all
+35 static pages (including all 20 `play/*` routes). The web build (`npm run build`)
+is unaffected.
+
+The archive `?date=` param is read CLIENT-side in `src/app/play/[game]/PlayClient.tsx`
+(`useSearchParams`, Suspense-wrapped) so the route is export-safe; `page.tsx` stays a
+server component for `generateStaticParams` + metadata.
+
+Then `npx cap sync` copies `out/` + plugins into the native projects (step 1).
+Note: because the web OAuth callback is excluded from the app, mobile auth must use
+a native deep-link flow when you wire auth (step 3) — the app does not use
+`/auth/callback`.
 
 ### 3. Wire entitlement to RevenueCat (MON-3)
 In `src/lib/entitlement.tsx`, replace the web-inert body with a RevenueCat

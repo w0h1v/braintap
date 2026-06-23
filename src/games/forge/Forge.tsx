@@ -10,6 +10,9 @@ import { formatClock } from "@/lib/share";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useEntitlement } from "@/lib/entitlement";
+import { adsAvailable, showRewardedAd } from "@/lib/ads";
+import { getMonetizationConfig } from "@/lib/config";
 import {
   cellIndex,
   cellsFor,
@@ -61,6 +64,7 @@ export function Forge({
   const N = puzzle.size;
   const CELLS = cellsFor(N);
   const saved = savedState ?? null;
+  const { isPremium } = useEntitlement();
   // Guard against older saves whose cells array length doesn't match this grid
   // size (e.g. a save from a different tier or the legacy single-size puzzle).
   const [cells, setCells] = useState<Cell[]>(() =>
@@ -85,6 +89,8 @@ export function Forge({
   const hintsRef = useRef(saved?.hintsUsed ?? 0);
   const gridRef = useRef<HTMLDivElement>(null);
   const longPress = useRef<{ id: number; timer: number } | null>(null);
+  // Guards the rewarded-ad hint flow against re-entrancy while an ad is showing.
+  const adInFlightRef = useRef(false);
 
   const clock = useGameClock(!won && started, saved?.elapsedMs ?? 0);
 
@@ -188,8 +194,18 @@ export function Forge({
   );
 
   // Reveal one correct cell from the solution (fill it, or mark an empty one).
-  const useHint = useCallback(() => {
+  const useHint = useCallback(async () => {
     if (won || hintsRef.current >= MAX_HINTS) return;
+    // MON-1: past the free threshold, a non-premium native user earns the hint
+    // by watching a rewarded ad. Inert on web (adsAvailable() is false), so the
+    // hint behaves exactly as before there. Ad fail → no hint, no penalty.
+    if (adsAvailable() && !isPremium && hintsRef.current >= getMonetizationConfig().freeHintThreshold) {
+      if (adInFlightRef.current) return; // ignore taps while a rewarded ad is in flight
+      adInFlightRef.current = true;
+      const r = await showRewardedAd();
+      adInFlightRef.current = false;
+      if (r !== "rewarded") return;
+    }
     setCells((prev) => {
       const hint = getHint(puzzle.solution, prev);
       if (!hint) return prev; // nothing left to reveal
@@ -207,7 +223,7 @@ export function Forge({
       queueMicrotask(() => checkSolved(next));
       return next;
     });
-  }, [won, puzzle.solution, reducedMotion, checkSolved]);
+  }, [won, puzzle.solution, reducedMotion, checkSolved, isPremium]);
 
   // Primary cell action depends on current mode.
   const onCellActivate = useCallback(

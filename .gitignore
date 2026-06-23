@@ -6,6 +6,7 @@
 # next.js
 /.next/
 /out/
+/.export-excluded/
 next-env.d.ts
 
 # production

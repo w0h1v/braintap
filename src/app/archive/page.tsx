@@ -1,15 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ALL_GAMES, GAME_COUNT } from "@/lib/games";
 import { useProgress } from "@/lib/progress";
 import { addDays, todayISO, fromISODate } from "@/lib/daily";
 import { cn } from "@/lib/cn";
 import type { GameId } from "@/lib/types";
 import type { StoredResult as ProgressStoredResult } from "@/lib/progress";
+import { useEntitlement } from "@/lib/entitlement";
+import { getMonetizationConfig } from "@/lib/config";
+import { Paywall } from "@/components/Paywall";
 
 const DAYS_BACK = 60;
+/** Recent days that stay free for non-premium users on native (web = all free). */
+const FREE_ARCHIVE_DAYS = 7;
 
 /** Short label like "Mon · Jun 16". */
 function dayLabel(iso: string): string {
@@ -38,6 +43,12 @@ export default function ArchivePage() {
   const today = todayISO();
   const hydrated = useProgress((s) => s.hydrated);
   const results = useProgress((s) => s.results);
+  const { isPremium, billingAvailable } = useEntitlement();
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  // Gated only on a native build with billing; on web billingAvailable is false,
+  // so the archive stays fully free — unchanged behavior.
+  const archiveGated =
+    billingAvailable && getMonetizationConfig().premiumUnlocksArchive && !isPremium;
 
   // Build the list of dates: today back through DAYS_BACK days.
   const days = useMemo(() => {
@@ -76,6 +87,22 @@ export default function ArchivePage() {
         <div className="mt-5 rounded-xl border border-amber/25 bg-[rgba(255,176,32,0.06)] px-4 py-3 font-mono text-[11px] leading-relaxed tracking-[0.04em] text-amber-soft">
           Note: archive plays are for practice and do not affect your daily streak.
         </div>
+
+        {archiveGated && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-cyan/25 bg-cyan/[0.06] px-4 py-3">
+            <span className="font-mono text-[11px] leading-relaxed text-cyan-soft">
+              The last {FREE_ARCHIVE_DAYS} days are free — unlock the full {DAYS_BACK}-day archive with Premium.
+            </span>
+            <button
+              type="button"
+              onClick={() => setPaywallOpen(true)}
+              className="shrink-0 rounded-pill px-3.5 py-1.5 font-display text-[12px] font-semibold text-[#04060f]"
+              style={{ backgroundImage: "linear-gradient(118deg, #00e5ff, #ff2bd6)" }}
+            >
+              Go Premium
+            </button>
+          </div>
+        )}
       </section>
 
       {/* day grid */}
@@ -87,6 +114,37 @@ export default function ArchivePage() {
             >;
             const playedCount = Object.keys(dayResults).length;
             const isToday = iso === today;
+            const locked = archiveGated && idx >= FREE_ARCHIVE_DAYS;
+
+            if (locked) {
+              return (
+                <div
+                  key={iso}
+                  className="flex flex-col rounded-2xl border border-line bg-gradient-to-b from-[rgba(13,21,42,0.6)] to-[rgba(8,12,26,0.55)] p-4"
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className="font-display text-[15px] font-semibold text-ink-mute">
+                      {dayLabel(iso)}
+                    </div>
+                    <span aria-hidden className="shrink-0 text-[12px]">
+                      🔒
+                    </span>
+                  </div>
+                  <div className="mt-3.5 flex flex-1 flex-col items-center justify-center gap-2.5 py-4 text-center">
+                    <div className="font-mono text-[10px] tracking-[0.14em] text-ink-faint">
+                      PREMIUM
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPaywallOpen(true)}
+                      className="rounded-pill border border-amber/40 bg-amber/[0.08] px-4 py-1.5 font-mono text-[11px] text-amber-soft transition-colors hover:bg-amber/[0.14]"
+                    >
+                      Unlock archive →
+                    </button>
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div
@@ -171,6 +229,8 @@ export default function ArchivePage() {
           })}
         </div>
       </section>
+
+      <Paywall open={paywallOpen} onClose={() => setPaywallOpen(false)} />
     </>
   );
 }

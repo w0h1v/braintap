@@ -1,411 +1,502 @@
 /**
- * Pips engine — pure, deterministic logic for an NYT-Pips-style domino balance
- * puzzle. No React, no DOM, no globals: fully unit-testable.
+ * Pips engine — pure, deterministic logic for a region-constraint domino puzzle
+ * (the NYT-Pips family). No React, no DOM, no globals: fully unit-testable.
  *
- * Board: a grid of `rows` × `pairs` slots. Each "pair" owns two adjacent
- * columns; a slot in that pair holds one horizontal domino contributing `left`
- * pips to its left column and `right` pips to its right column. The number of
- * columns is `2 * pairs`, the number of slots/dominoes is `rows * pairs`.
+ * Mechanic
+ * --------
+ * The board is an arbitrary set of grid cells, grouped into coloured **regions**.
+ * Each region carries a **constraint** on the pip values that end up inside it:
  *
- *   pair p owns columns 2p, 2p+1
- *   slot index = row * pairs + pair
+ *   • `eq N`     — the dots in the region sum to exactly N
+ *   • `lt N`     — the dots sum to less than N
+ *   • `gt N`     — the dots sum to more than N
+ *   • `equal`    — every cell in the region shows the same number
+ *   • `ne`       — every cell in the region shows a different number
+ *   • `empty`    — no constraint
  *
- * The default board is 2 rows × 2 pairs → 4 columns, 4 slots, 4 dominoes; the
- * legacy constants below describe exactly that shape so existing callers and
- * tests keep working unchanged. Difficulty tiers vary `rows`/`pairs` additively
- * (see {@link DIFFICULTY_CONFIG}).
+ * The player is given a tray of dominoes (each [a,b], faces 0..6) and must tile
+ * the whole board — every cell covered by exactly one domino half — so that
+ * every region's constraint is satisfied.
  *
- * The player places all dominoes (flipping freely) so every column's pip total
- * equals its target.
+ * A puzzle is *uniquely solvable* when exactly one distinct value-grid (the pip
+ * number on every cell) satisfies all constraints; two tilings that paint the
+ * identical grid are the same answer to the player and counted once.
  */
 
 import type { Rng } from "@/lib/rng";
 
-/** Legacy default-board constants (2 rows × 2 pairs). Kept for back-compat. */
-export const COLS = 4;
-export const SLOTS = 4;
-export const DOMINOES = 4;
 export const MIN_FACE = 0;
 export const MAX_FACE = 6;
 
 export type PipsDifficulty = "easy" | "medium" | "hard";
 
-/**
- * Board shape for a difficulty tier. `pairs` = number of column-pairs (columns
- * = 2*pairs); `rows` = slots stacked per pair (slots = rows*pairs). Escalating
- * board size + constraint count is the difficulty knob:
- *   easy   → 4 columns, 2 dominoes  (single row, lightly constrained)
- *   medium → 4 columns, 4 dominoes  (the historical default board)
- *   hard   → 6 columns, 6 dominoes  (wider board, more constraints)
- */
-export interface PipsConfig {
-  pairs: number;
-  rows: number;
-}
-
-export const DIFFICULTY_CONFIG: Record<PipsDifficulty, PipsConfig> = {
-  easy: { pairs: 2, rows: 1 },
-  medium: { pairs: 2, rows: 2 },
-  hard: { pairs: 3, rows: 2 },
-};
-
-/** Column count for a config. */
-export function colsFor(cfg: PipsConfig): number {
-  return cfg.pairs * 2;
-}
-
-/** Slot/domino count for a config. */
-export function slotsFor(cfg: PipsConfig): number {
-  return cfg.rows * cfg.pairs;
-}
-
 /** A domino tile: two faces, each showing 0..6 pips. */
 export type Domino = [number, number];
 
-export interface PipsPuzzle {
-  /** Target pip total for each column (length = 2*pairs). */
-  targets: number[];
-  /** The dominoes available in the tray, each [a, b] (length = rows*pairs). */
-  bank: Domino[];
-  /**
-   * The canonical solution: for each domino id, the slot it belongs in and
-   * whether it is flipped (swapping its two faces). Used by the validator and
-   * tests; the player never sees it.
-   */
-  solution: { slot: number; flip: boolean }[];
-  difficulty: PipsDifficulty;
-  /** Board shape. Optional for back-compat with legacy 2×2 saves/puzzles. */
-  config?: PipsConfig;
+/** A board cell at grid coordinate (row, col). */
+export interface Cell {
+  r: number;
+  c: number;
 }
 
-/** Resolve a puzzle's board shape, defaulting to the legacy 2×2 board. */
-export function configOf(p: { config?: PipsConfig }): PipsConfig {
-  return p.config ?? { pairs: 2, rows: 2 };
+export type ConstraintKind = "empty" | "eq" | "lt" | "gt" | "equal" | "ne";
+
+/**
+ * A region rule. `value` is only meaningful for the numeric kinds (`eq`/`lt`/
+ * `gt`); `equal`/`ne`/`empty` ignore it.
+ */
+export interface Constraint {
+  kind: ConstraintKind;
+  /** Threshold for eq/lt/gt; unused otherwise. */
+  value?: number;
 }
 
 /**
- * Pair start column for a slot at the given pair count. Slots feeding pair `p`
- * start at column `2p`. The 1-arg overload assumes the legacy 2-pair board.
+ * Where one domino sits in the canonical solution: it covers the two adjacent
+ * cells `a` and `b`. `flip` selects which face lands on `a` — unflipped puts
+ * `domino[0]` on `a` and `domino[1]` on `b`; flipped swaps them.
  */
-export function pairStart(slot: number, pairs = 2): number {
-  return (slot % pairs) * 2;
+export interface SolvedPlacement {
+  a: number;
+  b: number;
+  flip: boolean;
+}
+
+export interface PipsPuzzle {
+  difficulty: PipsDifficulty;
+  /** Board cells in fixed order; a cell's index is its position here. */
+  cells: Cell[];
+  /** Region id for each cell (parallel to `cells`). */
+  regionOf: number[];
+  /** One constraint per region (index = region id). */
+  constraints: Constraint[];
+  /** The tray dominoes the player must place (faces 0..6). */
+  dominoes: Domino[];
+  /**
+   * The canonical solution: for each domino id, which two cells it covers and
+   * its flip. Used by hints, the validator and tests; the player never sees it.
+   */
+  solution: SolvedPlacement[];
+}
+
+/** A player placement: per domino id, the cells it covers + flip, or null (tray). */
+export type Placed = { a: number; b: number; flip: boolean } | null;
+export type Placement = Placed[];
+
+// ---------------------------------------------------------------------------
+// Geometry
+// ---------------------------------------------------------------------------
+
+/** Stable key for a coordinate. */
+function ck(r: number, c: number): string {
+  return `${r},${c}`;
+}
+
+/**
+ * Orthogonal adjacency list: `neighbors[i]` is the list of cell indices sharing
+ * an edge with cell `i`. Computed from coordinates alone.
+ */
+export function buildAdjacency(cells: Cell[]): number[][] {
+  const index = new Map<string, number>();
+  cells.forEach((cell, i) => index.set(ck(cell.r, cell.c), i));
+  return cells.map(({ r, c }) => {
+    const out: number[] = [];
+    const around: [number, number][] = [
+      [r - 1, c],
+      [r + 1, c],
+      [r, c - 1],
+      [r, c + 1],
+    ];
+    for (const [nr, nc] of around) {
+      const j = index.get(ck(nr, nc));
+      if (j !== undefined) out.push(j);
+    }
+    return out;
+  });
 }
 
 /** Faces shown for a domino given its flip state. */
-export function halves(d: Domino, flip: boolean): { left: number; right: number } {
-  return flip ? { left: d[1], right: d[0] } : { left: d[0], right: d[1] };
+export function faces(d: Domino, flip: boolean): { a: number; b: number } {
+  return flip ? { a: d[1], b: d[0] } : { a: d[0], b: d[1] };
 }
 
-/**
- * A placement maps each slot index to a tray domino id (or null) plus the flip
- * state of each domino id.
- */
-export interface Placement {
-  /** slots[slot] = domino id placed there, or null. */
-  slots: (number | null)[];
-  /** flips[dominoId] = whether that domino is flipped. */
-  flips: boolean[];
+/** Cell indices belonging to each region id. */
+export function regionCells(puzzle: PipsPuzzle): number[][] {
+  const regionCount = puzzle.constraints.length;
+  const out: number[][] = Array.from({ length: regionCount }, () => []);
+  puzzle.regionOf.forEach((g, cell) => out[g].push(cell));
+  return out;
 }
 
-/**
- * Column sums for a placement. The board shape is inferred from `cfg` (defaults
- * to the legacy 2×2 board so old callers keep working).
- */
-export function colSums(
-  bank: Domino[],
-  placement: Placement,
-  cfg: PipsConfig = { pairs: 2, rows: 2 },
-): number[] {
-  const cols = colsFor(cfg);
-  const slots = slotsFor(cfg);
-  const s = new Array(cols).fill(0);
-  for (let slot = 0; slot < slots; slot++) {
-    const id = placement.slots[slot];
-    if (id == null) continue;
-    const { left, right } = halves(bank[id], placement.flips[id]);
-    const ps = pairStart(slot, cfg.pairs);
-    s[ps] += left;
-    s[ps + 1] += right;
+// ---------------------------------------------------------------------------
+// Constraint evaluation
+// ---------------------------------------------------------------------------
+
+/** Whether a fully-known set of region values satisfies a constraint. */
+export function evalConstraint(values: number[], c: Constraint): boolean {
+  switch (c.kind) {
+    case "empty":
+      return true;
+    case "eq":
+      return sum(values) === c.value;
+    case "lt":
+      return sum(values) < (c.value ?? 0);
+    case "gt":
+      return sum(values) > (c.value ?? 0);
+    case "equal":
+      return values.every((v) => v === values[0]);
+    case "ne":
+      return new Set(values).size === values.length;
   }
+}
+
+function sum(xs: number[]): number {
+  let s = 0;
+  for (const x of xs) s += x;
   return s;
 }
 
-/** True when all slots are filled and every column matches its target. */
+/** Render a constraint as a short badge label (e.g. "2", "<7", ">5", "=", "≠"). */
+export function constraintLabel(c: Constraint): string {
+  switch (c.kind) {
+    case "empty":
+      return "";
+    case "eq":
+      return String(c.value);
+    case "lt":
+      return `<${c.value}`;
+    case "gt":
+      return `>${c.value}`;
+    case "equal":
+      return "=";
+    case "ne":
+      return "≠";
+  }
+}
+
+/** A spoken description used for accessibility labels. */
+export function constraintDescription(c: Constraint): string {
+  switch (c.kind) {
+    case "empty":
+      return "no constraint";
+    case "eq":
+      return `dots sum to ${c.value}`;
+    case "lt":
+      return `dots sum to less than ${c.value}`;
+    case "gt":
+      return `dots sum to more than ${c.value}`;
+    case "equal":
+      return "all dots equal";
+    case "ne":
+      return "all dots different";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Player-facing board evaluation
+// ---------------------------------------------------------------------------
+
+/**
+ * The pip value on each cell for a placement, or null where uncovered. Throws
+ * nothing; ignores out-of-range placements defensively.
+ */
+export function gridValues(puzzle: PipsPuzzle, placement: Placement): (number | null)[] {
+  const grid: (number | null)[] = new Array(puzzle.cells.length).fill(null);
+  placement.forEach((p, id) => {
+    if (!p) return;
+    const d = puzzle.dominoes[id];
+    if (!d) return;
+    const f = faces(d, p.flip);
+    grid[p.a] = f.a;
+    grid[p.b] = f.b;
+  });
+  return grid;
+}
+
+/** True when every cell is covered and every region constraint is satisfied. */
 export function isSolved(puzzle: PipsPuzzle, placement: Placement): boolean {
-  const cfg = configOf(puzzle);
-  const slots = slotsFor(cfg);
-  for (let slot = 0; slot < slots; slot++) {
-    if (placement.slots[slot] == null) return false;
+  const grid = gridValues(puzzle, placement);
+  if (grid.some((v) => v == null)) return false;
+  const cells = regionCells(puzzle);
+  for (let g = 0; g < puzzle.constraints.length; g++) {
+    const values = cells[g].map((cell) => grid[cell] as number);
+    if (!evalConstraint(values, puzzle.constraints[g])) return false;
   }
-  const s = colSums(puzzle.bank, placement, cfg);
-  return s.every((v, i) => v === puzzle.targets[i]);
+  return true;
 }
 
-/** All permutations of [0..n-1]. */
-function permutations(n: number): number[][] {
-  const result: number[][] = [];
-  const used = new Array(n).fill(false);
-  const cur: number[] = [];
-  const recurse = () => {
-    if (cur.length === n) {
-      result.push(cur.slice());
-      return;
-    }
-    for (let i = 0; i < n; i++) {
-      if (used[i]) continue;
-      used[i] = true;
-      cur.push(i);
-      recurse();
-      cur.pop();
-      used[i] = false;
-    }
-  };
-  recurse();
-  return result;
+/** Per-region satisfaction snapshot for the UI (covered + currently met). */
+export function regionStatus(
+  puzzle: PipsPuzzle,
+  placement: Placement,
+): { covered: boolean; met: boolean }[] {
+  const grid = gridValues(puzzle, placement);
+  const cells = regionCells(puzzle);
+  return puzzle.constraints.map((c, g) => {
+    const vals = cells[g].map((cell) => grid[cell]);
+    const covered = vals.every((v) => v != null);
+    const met = covered && evalConstraint(vals as number[], c);
+    return { covered, met };
+  });
 }
 
-/** Cached permutation tables keyed by element count (board sizes are small). */
-const PERM_CACHE = new Map<number, number[][]>();
-function permsFor(n: number): number[][] {
-  let p = PERM_CACHE.get(n);
-  if (!p) {
-    p = permutations(n);
-    PERM_CACHE.set(n, p);
-  }
-  return p;
-}
+// ---------------------------------------------------------------------------
+// Solver — exhaustive, with region pruning, counting DISTINCT value-grids
+// ---------------------------------------------------------------------------
 
 export interface SolveReport {
   solvable: boolean;
   unique: boolean;
-  /** Number of DISTINCT solutions, counted up to the row symmetry below. */
-  solutionCount: number;
-  /** First solution found, expressed as a Placement. */
-  solution: Placement | null;
+  /** Number of distinct value-grids found, capped at the supplied limit. */
+  count: number;
+  /** First solving value-grid (length = cells), or null. */
+  grid: number[] | null;
 }
 
 /**
- * Two placements are the "same" solution when they put the same dominoes (with
- * the same faces) into the same column pairs, regardless of which physical row
- * they occupy — rows within a pair feed identical columns, so shuffling them is
- * not a meaningfully different answer. We canonicalise per pair by the sorted
- * multiset of (leftPips, rightPips) contributions plus the sorted domino ids
- * assigned to that pair.
- */
-function canonicalKey(bank: Domino[], placement: Placement, cfg: PipsConfig): string {
-  const slots = slotsFor(cfg);
-  const ids: number[][] = Array.from({ length: cfg.pairs }, () => []);
-  const contrib: string[][] = Array.from({ length: cfg.pairs }, () => []);
-  for (let slot = 0; slot < slots; slot++) {
-    const id = placement.slots[slot];
-    if (id == null) continue;
-    const { left, right } = halves(bank[id], placement.flips[id]);
-    const pair = slot % cfg.pairs;
-    ids[pair].push(id);
-    contrib[pair].push(`${left},${right}`);
-  }
-  const parts: string[] = [];
-  for (let pair = 0; pair < cfg.pairs; pair++) {
-    ids[pair].sort((a, b) => a - b);
-    contrib[pair].sort();
-    parts.push(`${ids[pair].join("-")}|${contrib[pair].join("/")}`);
-  }
-  return parts.join("||");
-}
-
-/**
- * Exhaustively count DISTINCT solutions (see {@link canonicalKey}). For N
- * dominoes there are N! orderings × 2^N flip combinations — tiny for the board
- * sizes used (≤ 6! × 2^6 = 46 080), so brute force and dedupe by canonical key.
+ * Exhaustively search domino tilings of the board that satisfy every region
+ * constraint, counting *distinct value-grids* up to `limit`.
  *
- * The board shape is inferred from the bank length unless `cfg` is supplied.
+ * Strategy: always extend from the lowest-index uncovered cell, trying every
+ * unplaced domino (deduped by the (faceOnAnchor,faceOnNeighbour) pair so two
+ * identical dominoes aren't explored twice from the same spot) in both
+ * orientations onto each uncovered neighbour. Each placement updates the two
+ * affected regions and is pruned by an admissible feasibility test (treating
+ * still-uncovered region cells as free 0..6) — so a real solution is never
+ * discarded, and completed regions are checked exactly.
  */
-export function solve(
-  targets: number[],
-  bank: Domino[],
-  limit = 2,
-  cfg: PipsConfig = inferConfig(bank.length, targets.length),
-): SolveReport {
-  const n = slotsFor(cfg);
-  const seen = new Set<string>();
-  let first: Placement | null = null;
-  for (const ordering of permsFor(n)) {
-    // ordering[slot] = domino id placed in `slot`.
-    for (let flipBits = 0; flipBits < 1 << n; flipBits++) {
-      const slots: (number | null)[] = new Array(n).fill(null);
-      const flips = new Array(n).fill(false);
-      for (let slot = 0; slot < n; slot++) {
-        const id = ordering[slot];
-        slots[slot] = id;
-        flips[id] = (flipBits & (1 << slot)) !== 0;
+export function solve(puzzle: PipsPuzzle, limit = 2): SolveReport {
+  const { cells, dominoes, regionOf, constraints } = puzzle;
+  const N = cells.length;
+  const adj = buildAdjacency(cells);
+  const regionCount = constraints.length;
+
+  // Per-region incremental aggregates.
+  const size = new Array(regionCount).fill(0);
+  regionOf.forEach((g) => (size[g] += 1));
+  const cnt = new Array(regionCount).fill(0);
+  const rsum = new Array(regionCount).fill(0);
+  const eqRef = new Array(regionCount).fill(-1); // first value seen, or -1
+  const eqBroken = new Array(regionCount).fill(false);
+  const neMask = new Array(regionCount).fill(0); // bitmask of values present
+  const neBroken = new Array(regionCount).fill(false);
+
+  const value = new Array(N).fill(-1);
+  const covered = new Array(N).fill(false);
+  const used = new Array(dominoes.length).fill(false);
+  const found = new Set<string>();
+
+  function feasible(g: number): boolean {
+    const c = constraints[g];
+    const remaining = size[g] - cnt[g];
+    switch (c.kind) {
+      case "empty":
+        return true;
+      case "eq": {
+        const v = c.value ?? 0;
+        return rsum[g] <= v && rsum[g] + MAX_FACE * remaining >= v;
       }
-      const placement: Placement = { slots, flips };
-      const s = colSums(bank, placement, cfg);
-      if (s.every((v, i) => v === targets[i])) {
-        if (first === null) first = placement;
-        seen.add(canonicalKey(bank, placement, cfg));
-        if (seen.size >= limit) {
-          return {
-            solvable: true,
-            unique: seen.size === 1,
-            solutionCount: seen.size,
-            solution: first,
-          };
+      case "lt":
+        // Min achievable final sum is the current sum (remaining cells can be 0
+        // under the admissible relaxation); feasible while still under value.
+        return rsum[g] < (c.value ?? 0);
+      case "gt":
+        return rsum[g] + MAX_FACE * remaining > (c.value ?? 0);
+      case "equal":
+        return !eqBroken[g];
+      case "ne":
+        return !neBroken[g];
+    }
+  }
+
+  interface RegionSnap {
+    g: number;
+    cnt: number;
+    sum: number;
+    eqRef: number;
+    eqBroken: boolean;
+    neMask: number;
+    neBroken: boolean;
+  }
+  function snap(g: number): RegionSnap {
+    return {
+      g,
+      cnt: cnt[g],
+      sum: rsum[g],
+      eqRef: eqRef[g],
+      eqBroken: eqBroken[g],
+      neMask: neMask[g],
+      neBroken: neBroken[g],
+    };
+  }
+  function restore(s: RegionSnap) {
+    cnt[s.g] = s.cnt;
+    rsum[s.g] = s.sum;
+    eqRef[s.g] = s.eqRef;
+    eqBroken[s.g] = s.eqBroken;
+    neMask[s.g] = s.neMask;
+    neBroken[s.g] = s.neBroken;
+  }
+  function addToRegion(cell: number, v: number) {
+    const g = regionOf[cell];
+    cnt[g] += 1;
+    rsum[g] += v;
+    if (eqRef[g] === -1) eqRef[g] = v;
+    else if (v !== eqRef[g]) eqBroken[g] = true;
+    const bit = 1 << v;
+    if (neMask[g] & bit) neBroken[g] = true;
+    neMask[g] |= bit;
+  }
+
+  function firstUncovered(): number {
+    for (let i = 0; i < N; i++) if (!covered[i]) return i;
+    return -1;
+  }
+
+  function recurse() {
+    if (found.size >= limit) return;
+    const a = firstUncovered();
+    if (a < 0) {
+      found.add(value.join(","));
+      return;
+    }
+    for (const b of adj[a]) {
+      if (covered[b]) continue;
+      const tried = new Set<string>();
+      for (let id = 0; id < dominoes.length; id++) {
+        if (used[id]) continue;
+        const [x, y] = dominoes[id];
+        const orientations: [number, number][] = x === y ? [[x, y]] : [[x, y], [y, x]];
+        for (const [fa, fb] of orientations) {
+          const key = `${fa},${fb}`;
+          if (tried.has(key)) continue; // identical placement via a twin domino
+          tried.add(key);
+
+          // Place.
+          const ga = regionOf[a];
+          const gb = regionOf[b];
+          const snaps = ga === gb ? [snap(ga)] : [snap(ga), snap(gb)];
+          covered[a] = covered[b] = true;
+          value[a] = fa;
+          value[b] = fb;
+          used[id] = true;
+          addToRegion(a, fa);
+          addToRegion(b, fb);
+
+          if (feasible(ga) && (ga === gb || feasible(gb))) recurse();
+
+          // Unplace.
+          used[id] = false;
+          value[a] = value[b] = -1;
+          covered[a] = covered[b] = false;
+          for (const s of snaps) restore(s);
+
+          if (found.size >= limit) return;
         }
       }
     }
   }
+
+  recurse();
+  const arr = [...found];
   return {
-    solvable: seen.size > 0,
-    unique: seen.size === 1,
-    solutionCount: seen.size,
-    solution: first,
+    solvable: arr.length > 0,
+    unique: arr.length === 1,
+    count: arr.length,
+    grid: arr.length > 0 ? arr[0].split(",").map(Number) : null,
   };
 }
 
-/**
- * Best-effort recovery of the board shape from sizes alone. Columns fix `pairs`
- * (cols / 2); the dominoes-per-pair fix `rows`. Falls back to the legacy 2×2.
- */
-function inferConfig(bankLen: number, colLen: number): PipsConfig {
-  const pairs = Math.max(1, Math.floor(colLen / 2));
-  const rows = Math.max(1, Math.round(bankLen / pairs));
-  if (pairs * rows === bankLen) return { pairs, rows };
-  return { pairs: 2, rows: 2 };
-}
+// ---------------------------------------------------------------------------
+// Hints
+// ---------------------------------------------------------------------------
 
-/**
- * Generate a puzzle by tiling first (guarantees a solution): draw N dominoes,
- * assign each to a slot with a random flip, derive the column targets from that
- * arrangement, then keep it only if the resulting puzzle has a UNIQUE solution.
- * Retries with fresh draws until unique (bounded), falling back to the last
- * non-unique attempt if needed (still always solvable).
- *
- * `cfg` selects the board shape; it defaults to the legacy 2×2 board so callers
- * that omit it reproduce the original behaviour shape.
- */
-export function generatePuzzle(
-  rng: Rng,
-  cfg: PipsConfig = { pairs: 2, rows: 2 },
-): PipsPuzzle {
-  const n = slotsFor(cfg);
-  let fallback: PipsPuzzle | null = null;
-
-  for (let attempt = 0; attempt < 600; attempt++) {
-    // Draw N dominoes (faces 0..6). Duplicates allowed (like a real set draw).
-    const bank: Domino[] = [];
-    for (let i = 0; i < n; i++) {
-      bank.push([rng.int(MIN_FACE, MAX_FACE), rng.int(MIN_FACE, MAX_FACE)]);
-    }
-
-    // Assign each domino to a distinct slot, each with a random flip.
-    const slotForId = rng.shuffle(Array.from({ length: n }, (_, i) => i)); // slotForId[id] = slot
-    const flips = Array.from({ length: n }, () => rng.chance(0.5));
-
-    const slots: (number | null)[] = new Array(n).fill(null);
-    for (let id = 0; id < n; id++) slots[slotForId[id]] = id;
-
-    const placement: Placement = { slots, flips };
-    const targets = colSums(bank, placement, cfg);
-
-    const solution: PipsPuzzle["solution"] = [];
-    for (let id = 0; id < n; id++) {
-      solution.push({ slot: slotForId[id], flip: flips[id] });
-    }
-
-    const puzzle: PipsPuzzle = {
-      targets,
-      bank,
-      solution,
-      difficulty: difficultyFor(cfg),
-      config: cfg,
-    };
-
-    const report = solve(targets, bank, 2, cfg);
-    if (report.unique) return puzzle;
-    if (report.solvable && fallback === null) fallback = puzzle;
-  }
-
-  // Should essentially never happen; the construction guarantees solvability.
-  return fallback as PipsPuzzle;
-}
-
-/** The difficulty tier whose board shape matches `cfg` (defaults to medium). */
-function difficultyFor(cfg: PipsConfig): PipsDifficulty {
-  for (const k of Object.keys(DIFFICULTY_CONFIG) as PipsDifficulty[]) {
-    const c = DIFFICULTY_CONFIG[k];
-    if (c.pairs === cfg.pairs && c.rows === cfg.rows) return k;
-  }
-  return "medium";
-}
-
-/**
- * A hint reveals one domino from the stored solution: which domino id belongs
- * in which slot, with which flip. Returns the FIRST (lowest id) domino that is
- * not yet correctly placed in `current` (right slot AND right flip). Returns
- * null when every domino already matches the solution (nothing left to reveal).
- *
- * Pure: depends only on the puzzle's stored solution and the current placement.
- */
 export interface PipsHint {
   /** Domino id to reveal. */
   id: number;
-  /** Slot it belongs in. */
-  slot: number;
-  /** Whether it should be flipped. */
+  a: number;
+  b: number;
   flip: boolean;
 }
 
-export function getHint(puzzle: PipsPuzzle, current: Placement): PipsHint | null {
-  const n = puzzle.solution.length;
-  for (let id = 0; id < n; id++) {
-    const { slot, flip } = puzzle.solution[id];
-    const placedHere = current.slots[slot] === id;
-    const flipMatches = (current.flips[id] ?? false) === flip;
-    if (!placedHere || !flipMatches) {
-      return { id, slot, flip };
-    }
+/**
+ * Reveal the first (lowest-id) domino whose *painted result* doesn't yet match
+ * the canonical solution. A domino counts as correct when it covers the same two
+ * cells and shows the solution's value on each — independent of how the
+ * placement is encoded (a/b order + flip). This keeps `getHint` consistent with
+ * `isSolved`/`gridValues`, which are order-agnostic: a value-identical reversed
+ * placement is recognised as solved and never re-hinted. Returns null when every
+ * domino already matches.
+ */
+export function getHint(puzzle: PipsPuzzle, placement: Placement): PipsHint | null {
+  for (let id = 0; id < puzzle.solution.length; id++) {
+    const sol = puzzle.solution[id];
+    const cur = placement[id];
+    if (!cur) return { id, a: sol.a, b: sol.b, flip: sol.flip };
+    const sf = faces(puzzle.dominoes[id], sol.flip);
+    const cf = faces(puzzle.dominoes[id], cur.flip);
+    const painted: Record<number, number> = { [cur.a]: cf.a, [cur.b]: cf.b };
+    const sameCells =
+      (cur.a === sol.a && cur.b === sol.b) || (cur.a === sol.b && cur.b === sol.a);
+    const matches = sameCells && painted[sol.a] === sf.a && painted[sol.b] === sf.b;
+    if (!matches) return { id, a: sol.a, b: sol.b, flip: sol.flip };
   }
   return null;
 }
 
-/** Validate that a puzzle is well-formed and its stored solution is correct. */
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+/** Validate a puzzle is well-formed and its stored solution is correct + solvable. */
 export function validatePips(p: PipsPuzzle): boolean {
-  if (!p) return false;
-  const cfg = configOf(p);
-  const cols = colsFor(cfg);
-  const n = slotsFor(cfg);
-  if (p.targets.length !== cols) return false;
-  if (p.bank.length !== n) return false;
-  if (p.solution.length !== n) return false;
+  if (!p || !Array.isArray(p.cells) || p.cells.length === 0) return false;
+  const N = p.cells.length;
+  if (N % 2 !== 0) return false; // dominoes must tile it
+  if (p.dominoes.length !== N / 2) return false;
+  if (p.solution.length !== N / 2) return false;
+  if (p.regionOf.length !== N) return false;
 
   // Faces in range.
-  for (const d of p.bank) {
+  for (const d of p.dominoes) {
     if (d.length !== 2) return false;
     for (const f of d) {
       if (!Number.isInteger(f) || f < MIN_FACE || f > MAX_FACE) return false;
     }
   }
-  // Targets are non-negative integers within the achievable range. A column can
-  // receive at most `rows` faces, each ≤ MAX_FACE.
-  for (const t of p.targets) {
-    if (!Number.isInteger(t) || t < 0 || t > MAX_FACE * cfg.rows) return false;
+
+  // Region ids are contiguous 0..K-1 with one constraint each.
+  const regionCount = p.constraints.length;
+  if (regionCount < 1) return false;
+  for (const g of p.regionOf) {
+    if (!Number.isInteger(g) || g < 0 || g >= regionCount) return false;
+  }
+  const usedRegions = new Set(p.regionOf);
+  if (usedRegions.size !== regionCount) return false; // no empty/undefined regions
+
+  // Constraints well-formed.
+  for (const c of p.constraints) {
+    if (c.kind === "eq" || c.kind === "lt" || c.kind === "gt") {
+      if (!Number.isInteger(c.value) || (c.value as number) < 0) return false;
+    }
   }
 
-  // The stored solution must use every slot exactly once.
-  const usedSlots = new Set<number>();
-  const slots: (number | null)[] = new Array(n).fill(null);
-  const flips = new Array(n).fill(false);
-  for (let id = 0; id < n; id++) {
-    const { slot, flip } = p.solution[id];
-    if (slot < 0 || slot >= n || usedSlots.has(slot)) return false;
-    usedSlots.add(slot);
-    slots[slot] = id;
-    flips[id] = flip;
+  // Adjacency map for solution validity.
+  const adj = buildAdjacency(p.cells);
+  const cover = new Array(N).fill(0);
+  for (let id = 0; id < p.solution.length; id++) {
+    const { a, b } = p.solution[id];
+    if (a < 0 || a >= N || b < 0 || b >= N || a === b) return false;
+    if (!adj[a].includes(b)) return false; // must be adjacent cells
+    cover[a] += 1;
+    cover[b] += 1;
   }
-  // The stored solution must actually satisfy the targets.
-  if (!isSolved(p, { slots, flips })) return false;
+  if (cover.some((n) => n !== 1)) return false; // exact tiling
 
-  // And the puzzle must be solvable (at least one solution exists).
-  return solve(p.targets, p.bank, 1, cfg).solvable;
+  // Stored solution actually satisfies every constraint.
+  const placement: Placement = p.solution.map((s) => ({ a: s.a, b: s.b, flip: s.flip }));
+  if (!isSolved(p, placement)) return false;
+
+  // And the puzzle is solvable.
+  return solve(p, 1).solvable;
 }
