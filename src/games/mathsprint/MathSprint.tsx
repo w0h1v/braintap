@@ -375,8 +375,8 @@ export function MathSprint({
           minHeight: 150,
           background: flash
             ? `linear-gradient(180deg, ${ACCENT.solid}33, rgba(8,12,26,0.4))`
-            : "rgba(255,255,255,0.04)",
-          borderColor: flash ? `${ACCENT.solid}99` : "rgba(255,255,255,0.1)",
+            : `${ACCENT.solid}14`,
+          borderColor: flash ? `${ACCENT.solid}99` : `${ACCENT.solid}1f`,
           transition: reducedMotion ? undefined : "background 200ms, border-color 200ms",
         }}
         aria-label={
@@ -450,8 +450,8 @@ export function MathSprint({
                     minHeight: 48,
                     fontSize: "clamp(20px, 6vw, 26px)",
                     color: "#eafcff",
-                    background: "rgba(255,255,255,0.06)",
-                    borderColor: "rgba(255,255,255,0.08)",
+                    background: `${ACCENT.solid}33`,
+                    borderColor: `${ACCENT.solid}4d`,
                   }}
                 >
                   {k.label}

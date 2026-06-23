@@ -387,7 +387,7 @@ export function Schulte({
           style={{
             gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
             borderColor: `${ACCENT.solid}33`,
-            background: `${ACCENT.solid}0d`,
+            background: `${ACCENT.solid}14`,
             boxShadow: running
               ? `0 18px 50px -22px ${ACCENT.solid}66, inset 0 0 50px -34px ${ACCENT.solid}`
               : "0 18px 50px -28px rgba(0,0,0,0.6)",
@@ -422,9 +422,9 @@ export function Schulte({
                       : size >= 7
                         ? "clamp(13px, 4vw, 18px)"
                         : "clamp(16px, 5.4vw, 22px)",
-                  background: isFound ? TAPPED_BG : "rgba(255,255,255,0.06)",
+                  background: isFound ? TAPPED_BG : `${ACCENT.solid}12`,
                   color: isFound ? TAPPED_FG : "#eafcff",
-                  border: `1px solid ${isFound ? TAPPED_BORDER : "rgba(255,255,255,0.08)"}`,
+                  border: `1px solid ${isFound ? TAPPED_BORDER : `${ACCENT.solid}22`}`,
                   transform: isFound ? "scale(0.94)" : undefined,
                   ["--tw-ring-color" as string]: ACCENT.solid,
                 }}

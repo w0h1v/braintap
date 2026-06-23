@@ -507,11 +507,11 @@ export function Sudoku({
           const isHint = hintCells.has(i);
           const isFlash = flashCells.has(i);
 
-          let bg = "rgba(6,10,22,0.55)";
+          let bg = `${ACCENT.solid}12`;
           if (isSel) bg = `${ACCENT.solid}4d`;
-          else if (sameVal) bg = "rgba(0,229,255,0.18)";
-          else if (isPeer) bg = "rgba(255,255,255,0.05)";
-          if (isHint && !isSel) bg = "rgba(0,229,255,0.14)";
+          else if (sameVal) bg = `${ACCENT.solid}33`;
+          else if (isPeer) bg = `${ACCENT.solid}20`;
+          if (isHint && !isSel) bg = "rgba(0,229,255,0.16)";
           if (conflict) bg = "rgba(255,107,157,0.18)";
           if (isFlash) bg = `${ACCENT.solid}40`;
 
@@ -538,9 +538,8 @@ export function Sudoku({
               className={cn(
                 "relative flex touch-manipulation select-none items-center justify-center font-display outline-none",
                 !reducedMotion && "transition-[background-color,transform,color] duration-150",
-                conflict && !reducedMotion && "animate-pulse2",
-            // Persistent non-colour cue (a ring) so conflicts are perceivable
-            // without relying on the red tint or the (motion-gated) pulse.
+            // A persistent ring marks conflicts without a throbbing animation —
+            // a steady cue reads clearly but isn't visually loud.
             conflict && "ring-2 ring-inset ring-[#ff6b9d]",
                 isSel && !reducedMotion && "z-10 scale-[1.04]",
               )}
@@ -608,8 +607,8 @@ export function Sudoku({
                 disabled ? "opacity-35" : "active:opacity-90",
               )}
               style={{
-                background: notesMode ? `${ACCENT.solid}26` : `${ACCENT.solid}24`,
-                border: `1px solid ${ACCENT.solid}${notesMode ? "59" : "33"}`,
+                background: notesMode ? `${ACCENT.solid}40` : `${ACCENT.solid}33`,
+                border: `1px solid ${ACCENT.solid}${notesMode ? "73" : "4d"}`,
               }}
               aria-label={`${notesMode ? "Note" : "Enter"} ${n}${exhausted ? ", all placed" : ""}`}
             >

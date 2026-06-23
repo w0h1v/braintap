@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Card, Pill } from "@/components/ui/Card";
+import { GAME_COUNT_WORD } from "@/lib/games";
 
 export const metadata: Metadata = {
   title: "How to play — BrainTap Games",
@@ -89,9 +90,9 @@ export default function HowToPlayPage() {
           </span>
         </h1>
         <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-ink-soft">
-          BrainTap is a daily brain-games ritual. A fresh set of fifteen puzzles
-          unlocks each day — play what you like, build a streak, and watch your
-          mind sharpen over time.
+          BrainTap is a daily brain-games ritual. A fresh set of{" "}
+          {GAME_COUNT_WORD.toLowerCase()} puzzles unlocks each day — play what you
+          like, build a streak, and watch your mind sharpen over time.
         </p>
       </header>
 
@@ -123,7 +124,7 @@ export default function HowToPlayPage() {
             Your streak counts the number of days in a row you have finished at
             least one game. It updates the moment you solve your first puzzle of
             the day. There is no penalty for playing only one game — and no bonus
-            for cramming all fifteen — so a streak is purely a measure of showing
+            for cramming all {GAME_COUNT_WORD.toLowerCase()} — so a streak is purely a measure of showing
             up. If a day passes with nothing solved, the streak returns to zero
             and you start fresh. Progress is saved on your device, so you can pick
             up right where you left off.

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ALL_GAMES } from "@/lib/games";
+import { ALL_GAMES, GAME_COUNT } from "@/lib/games";
 import { useProgress } from "@/lib/progress";
 import { addDays, todayISO, fromISODate } from "@/lib/daily";
 import { cn } from "@/lib/cn";
@@ -168,7 +168,7 @@ export default function ArchivePage() {
                     ) : null}
                   </div>
                   <div className="shrink-0 font-mono text-[10px] tracking-[0.1em] text-ink-mute">
-                    {hydrated ? `${playedCount}/15` : "—"}
+                    {hydrated ? `${playedCount}/${GAME_COUNT}` : "—"}
                   </div>
                 </div>
 

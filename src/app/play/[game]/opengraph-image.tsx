@@ -15,7 +15,7 @@ export default function Image({ params }: { params: { game: string } }) {
   // Graceful fallback for unknown ids — generic BrainTap branding.
   const name = meta?.name ?? "BrainTap Games";
   const category = meta?.category ?? "DAILY BRAIN GAMES";
-  const tagline = meta?.tagline ?? "Fifteen brain games. One a day.";
+  const tagline = meta?.tagline ?? "Twenty brain games. One a day.";
   const accentFrom = meta?.accent.from ?? "#00e5ff";
   const accentTo = meta?.accent.to ?? "#ff2bd6";
   const accentSoft = meta?.accent.soft ?? "#9fe9ff";

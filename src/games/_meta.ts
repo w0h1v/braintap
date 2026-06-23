@@ -1,7 +1,7 @@
 import type { GameId, GameMeta } from "@/lib/types";
 
 /**
- * Canonical metadata for all 15 games. This is the single source of truth for
+ * Canonical metadata for every game. This is the single source of truth for
  * the hub grid, rotation, and routing. Individual game modules import their
  * meta from here so the platform stays consistent.
  */

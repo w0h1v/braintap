@@ -1,6 +1,7 @@
 "use client";
 
 import { Modal } from "./ui/Modal";
+import { GAME_COUNT_WORD } from "@/lib/games";
 import { useProgress } from "@/lib/progress";
 import { todayISO } from "@/lib/daily";
 import { cn } from "@/lib/cn";
@@ -63,7 +64,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       </div>
 
       <p className="mt-4 text-sm leading-relaxed text-ink-soft">
-        Fifteen science-backed brain games, refreshed daily. Train memory, logic, language,
+        {GAME_COUNT_WORD} science-backed brain games, refreshed daily. Train memory, logic, language,
         numbers and focus — and build a streak.
       </p>
       <p className="mt-3 text-sm text-amber">

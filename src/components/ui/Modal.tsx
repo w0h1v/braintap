@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 
 const FOCUSABLE_SELECTOR = [
@@ -20,12 +21,18 @@ export function Modal({
   children,
   labelledBy,
   className,
+  showClose = false,
+  closeLabel = "Close",
 }: {
   open: boolean;
   onClose: () => void;
   children: ReactNode;
   labelledBy?: string;
   className?: string;
+  /** Render a visible ✕ in the top-right corner (in addition to backdrop/Esc). */
+  showClose?: boolean;
+  /** Accessible label / tooltip for the close button. */
+  closeLabel?: string;
 }) {
   const cardRef = useRef<HTMLDivElement>(null);
 
@@ -106,34 +113,52 @@ export function Modal({
     };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
+  // Portal to <body> so the overlay always sits above page chrome (footer, nav)
+  // regardless of any transformed/positioned ancestor stacking context. The
+  // backdrop is the scroll container, so a card taller than the viewport scrolls
+  // cleanly instead of overflowing onto the page behind it.
+  return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      className="fixed inset-0 z-[100] overflow-y-auto overscroll-contain"
       style={{ background: "rgba(2,3,9,0.7)", backdropFilter: "blur(8px)" }}
       onClick={onClose}
       role="presentation"
     >
-      <div
-        ref={cardRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={labelledBy}
-        tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
-        className={cn(
-          "w-full max-w-[420px] animate-pop rounded-3xl border p-7 outline-none sm:p-8",
-          "border-cyan/20",
-          className,
-        )}
-        style={{
-          background:
-            "linear-gradient(180deg, rgba(16,24,48,0.96), rgba(8,12,26,0.96))",
-        }}
-      >
-        {children}
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div
+          ref={cardRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={labelledBy}
+          tabIndex={-1}
+          onClick={(e) => e.stopPropagation()}
+          className={cn(
+            "relative w-full max-w-[420px] animate-pop rounded-3xl border p-7 outline-none sm:p-8",
+            "border-cyan/20",
+            className,
+          )}
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(16,24,48,0.96), rgba(8,12,26,0.96))",
+          }}
+        >
+          {showClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={closeLabel}
+              title={closeLabel}
+              className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-lg leading-none text-ink-soft outline-none transition-colors hover:bg-white/10 hover:text-ink focus-visible:ring-2 focus-visible:ring-white/40"
+            >
+              ✕
+            </button>
+          )}
+          {children}
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

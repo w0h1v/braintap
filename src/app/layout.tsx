@@ -5,6 +5,7 @@ import { Providers } from "./providers";
 import { Nav } from "@/components/Nav";
 import { Footer } from "@/components/Footer";
 import { AmbientBackdrop } from "@/components/ui/AmbientBackdrop";
+import { GAME_COUNT_WORD } from "@/lib/games";
 
 const grotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -26,7 +27,7 @@ const SITE_URL =
 
 const SITE_TITLE = "BrainTap Games — one puzzle a day";
 const SITE_DESCRIPTION =
-  "Fifteen science-backed brain games, one fresh challenge every day. Build a streak, level up your cognition, and watch your mind sharpen.";
+  `${GAME_COUNT_WORD} science-backed brain games, one fresh challenge every day. Build a streak, level up your cognition, and watch your mind sharpen.`;
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

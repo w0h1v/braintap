@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
-export const alt = "BrainTap Games — fifteen brain games, one a day";
+export const alt = "BrainTap Games — twenty brain games, one a day";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -115,7 +115,7 @@ export default function Image() {
             color: "#e6ecff",
           }}
         >
-          Fifteen brain games. One a day.
+          Twenty brain games. One a day.
         </div>
       </div>
     ),

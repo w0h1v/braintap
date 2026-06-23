@@ -415,7 +415,7 @@ export function Slide({
         style={{
           maxWidth: BOARD_W,
           aspectRatio: "1 / 1",
-          background: `${ACCENT.solid}10`,
+          background: `${ACCENT.solid}14`,
           border: `1px solid ${ACCENT.solid}${isComplete ? "59" : "29"}`,
           boxShadow: isComplete
             ? `0 18px 50px -18px ${ACCENT.solid}80, inset 0 0 50px -30px ${ACCENT.solid}`
@@ -444,8 +444,8 @@ export function Slide({
                   height: `calc(${pct}% - ${gut}px)`,
                   left: `calc(${bc * pct}% + ${gut / 2}px)`,
                   top: `calc(${br * pct}% + ${gut / 2}px)`,
-                  background: `${ACCENT.solid}08`,
-                  boxShadow: `inset 0 0 0 1px ${ACCENT.solid}1a`,
+                  background: `${ACCENT.solid}12`,
+                  boxShadow: `inset 0 0 0 1px ${ACCENT.solid}1f`,
                   transition: reducedMotion ? undefined : `left ${SLIDE_MS}ms ease, top ${SLIDE_MS}ms ease`,
                 }}
               />

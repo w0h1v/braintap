@@ -488,7 +488,7 @@ export function Crossword({
           const wrong = checking && value !== "" && value !== solution[i] && !isHint;
           const revealDelay = solving && !reducedMotion ? (r + c) * 30 : 0;
 
-          let bg = "rgba(7,11,24,0.55)";
+          let bg = `${ACCENT.solid}12`;
           if (inActive) bg = `${ACCENT.solid}1f`;
           if (isSel) bg = `${ACCENT.solid}40`;
           if (isHint && !isSel) bg = `${ACCENT.solid}26`;
@@ -525,8 +525,8 @@ export function Crossword({
                       ? "btPop 0.32s ease both"
                       : undefined,
                 boxShadow: isSel ? `inset 0 0 0 2px ${ACCENT.solid}` : undefined,
-                borderRight: c === size - 1 ? "none" : "1px solid rgba(255,255,255,0.07)",
-                borderBottom: r === size - 1 ? "none" : "1px solid rgba(255,255,255,0.07)",
+                borderRight: c === size - 1 ? "none" : `1px solid ${ACCENT.solid}22`,
+                borderBottom: r === size - 1 ? "none" : `1px solid ${ACCENT.solid}22`,
               }}
             >
               {num > 0 && (
@@ -633,8 +633,8 @@ export function Crossword({
                   !reducedMotion && "transition-transform active:scale-90",
                 )}
                 style={{
-                  background: `${ACCENT.solid}1c`,
-                  border: `1px solid ${ACCENT.solid}33`,
+                  background: `${ACCENT.solid}33`,
+                  border: `1px solid ${ACCENT.solid}4d`,
                   color: "#eafcff",
                 }}
               >
