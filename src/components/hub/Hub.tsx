@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ALL_GAMES, GAME_METAS, ROTATION, GAME_COUNT, GAME_COUNT_WORD } from "@/lib/games";
 import { GAME_ORDER } from "@/games/_meta";
 import { GameCard } from "./GameCard";
@@ -9,8 +9,11 @@ import { ResetCountdown } from "./ResetCountdown";
 import { StatBox } from "@/components/ui/Card";
 import { useProgress, liveStreak } from "@/lib/progress";
 import { dateLabel, todayISO } from "@/lib/daily";
+import { SKILL_DOMAINS, SKILL_META } from "@/lib/skills";
 import type { GameId, SkillDomain } from "@/lib/types";
 import { cn } from "@/lib/cn";
+
+type SkillFilter = SkillDomain | "all";
 
 const TOTAL_GAMES = GAME_COUNT;
 
@@ -48,6 +51,29 @@ export function Hub() {
   }, [todayResults]);
 
   const weekday = new Date().toLocaleDateString("en-US", { weekday: "short" });
+
+  // Favourites (persisted) — pinned in their own row at the top, in GAME_ORDER.
+  const favorites = useProgress((s) => s.favorites);
+  const favoriteGames = useMemo(() => {
+    if (!hydrated || favorites.length === 0) return [];
+    const fav = new Set(favorites);
+    return ALL_GAMES.filter((g) => fav.has(g.meta.id));
+  }, [hydrated, favorites]);
+
+  // Skill-domain filter for the full grid.
+  const [skill, setSkill] = useState<SkillFilter>("all");
+  const filteredGames = useMemo(
+    () =>
+      skill === "all" ? ALL_GAMES : ALL_GAMES.filter((g) => g.meta.skills.includes(skill)),
+    [skill],
+  );
+
+  const renderCard = (g: (typeof ALL_GAMES)[number]) => {
+    const r = todayResults[g.meta.id];
+    const label =
+      r?.shareText && r.shareText.length <= 5 ? r.shareText : r ? "Replay" : undefined;
+    return <GameCard key={g.meta.id} meta={g.meta} done={Boolean(r)} resultLabel={label} />;
+  };
 
   return (
     <>
@@ -142,6 +168,24 @@ export function Hub() {
         </div>
       </section>
 
+      {/* favourites (pinned at the top once the player stars a game) */}
+      {favoriteGames.length > 0 && (
+        <section className="mx-auto max-w-shell px-6 pt-16 sm:px-8 sm:pt-[70px]">
+          <div className="flex items-center gap-2.5">
+            <span className="text-lg leading-none text-[#ffd66b]" aria-hidden>
+              ★
+            </span>
+            <h2 className="font-display text-[clamp(22px,2.6vw,30px)] font-semibold tracking-[-0.02em] text-ink">
+              Your favourites
+            </h2>
+            <span className="font-mono text-[11px] text-ink-mute">{favoriteGames.length}</span>
+          </div>
+          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {favoriteGames.map(renderCard)}
+          </div>
+        </section>
+      )}
+
       {/* today's puzzles */}
       <section className="mx-auto max-w-shell px-6 pt-16 sm:px-8 sm:pt-[70px]">
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -158,16 +202,32 @@ export function Hub() {
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {ALL_GAMES.map((g) => {
-            const r = todayResults[g.meta.id];
-            const label =
-              r?.shareText && r.shareText.length <= 5 ? r.shareText : r ? "Replay" : undefined;
-            return (
-              <GameCard key={g.meta.id} meta={g.meta} done={Boolean(r)} resultLabel={label} />
-            );
-          })}
+        {/* skill-domain filter */}
+        <div
+          className="mt-5 flex flex-wrap items-center gap-2"
+          role="group"
+          aria-label="Filter games by skill"
+        >
+          <FilterChip label="All" active={skill === "all"} onClick={() => setSkill("all")} />
+          {SKILL_DOMAINS.map((d) => (
+            <FilterChip
+              key={d}
+              label={SKILL_META[d].label}
+              color={SKILL_META[d].color}
+              active={skill === d}
+              onClick={() => setSkill(d)}
+            />
+          ))}
         </div>
+
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredGames.map(renderCard)}
+        </div>
+        {filteredGames.length === 0 && (
+          <div className="mt-6 rounded-2xl border border-line bg-white/[0.02] py-10 text-center font-mono text-[12px] text-ink-mute">
+            No games match this filter.
+          </div>
+        )}
       </section>
 
       {/* weekly rotation */}
@@ -245,5 +305,34 @@ export function Hub() {
       <div className="pb-4" />
       {GAME_ORDER.length === 0 ? null : null}
     </>
+  );
+}
+
+function FilterChip({
+  label,
+  active,
+  color,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  color?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "rounded-pill border px-3.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.1em] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/40",
+        active
+          ? "font-semibold text-[#04060f]"
+          : "border-line bg-white/[0.03] text-ink-soft hover:border-line-strong hover:text-ink",
+      )}
+      style={active ? { background: color ?? "#00e5ff", borderColor: color ?? "#00e5ff" } : undefined}
+    >
+      {label}
+    </button>
   );
 }

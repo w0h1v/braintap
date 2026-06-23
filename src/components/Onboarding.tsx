@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Modal } from "@/components/ui/Modal";
 import { useProgress } from "@/lib/progress";
 import { cn } from "@/lib/cn";
-import { GAME_METAS } from "@/games/_meta";
+import { GAME_METAS, GAME_ORDER } from "@/games/_meta";
 import { GAME_COUNT } from "@/lib/games";
 import type { SkillDomain } from "@/lib/types";
 
@@ -27,19 +27,26 @@ const SKILLS: { id: SkillDomain; label: string; color: string }[] = [
   { id: "focus", label: "Focus", color: "#ff9e3d" },
 ];
 
+/** A mosaic of the daily deck — one tile per game, in that game's accent. */
 function DailyArt() {
+  const reducedMotion = useProgress((s) => s.settings.zen);
   return (
-    <div className="grid grid-cols-5 gap-1.5" aria-hidden>
-      {Array.from({ length: 15 }, (_, i) => (
-        <div
-          key={i}
-          className="aspect-square rounded-[7px] border"
-          style={{
-            borderColor: `${ACCENT.solid}33`,
-            background: `linear-gradient(140deg, ${ACCENT.from}22, ${ACCENT.to}14)`,
-          }}
-        />
-      ))}
+    <div className="grid w-full grid-cols-5 gap-1.5" aria-hidden>
+      {GAME_ORDER.map((id, i) => {
+        const a = GAME_METAS[id].accent;
+        return (
+          <div
+            key={id}
+            className={cn("aspect-square rounded-[7px] border", !reducedMotion && "animate-pop")}
+            style={{
+              borderColor: `${a.solid}66`,
+              background: `linear-gradient(140deg, ${a.solid}40, ${a.solid}12)`,
+              boxShadow: `inset 0 0 10px -5px ${a.solid}`,
+              ...(reducedMotion ? {} : { animationDelay: `${i * 22}ms` }),
+            }}
+          />
+        );
+      })}
     </div>
   );
 }

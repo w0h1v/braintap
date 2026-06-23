@@ -38,11 +38,15 @@ interface ProgressState {
   currentStreak: number;
   longestStreak: number;
   lastPlayedISO: string | null;
+  /** Game ids the player has starred, newest-first is not guaranteed — display in GAME_ORDER. */
+  favorites: GameId[];
 
   // actions
   setHydrated: () => void;
   setSetting: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
   setOnboarded: (v: boolean) => void;
+  /** Star / unstar a game (persisted). */
+  toggleFavorite: (id: GameId) => void;
   recordResult: (
     gameId: GameId,
     dateISO: string,
@@ -82,8 +86,16 @@ export const useProgress = create<ProgressState>()(
       currentStreak: 0,
       longestStreak: 0,
       lastPlayedISO: null,
+      favorites: [],
 
       setHydrated: () => set({ hydrated: true }),
+
+      toggleFavorite: (id) =>
+        set((s) => ({
+          favorites: s.favorites.includes(id)
+            ? s.favorites.filter((x) => x !== id)
+            : [...s.favorites, id],
+        })),
 
       setSetting: (key, value) =>
         set((s) => ({ settings: { ...s.settings, [key]: value } })),
@@ -209,6 +221,7 @@ export const useProgress = create<ProgressState>()(
         currentStreak: s.currentStreak,
         longestStreak: s.longestStreak,
         lastPlayedISO: s.lastPlayedISO,
+        favorites: s.favorites,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated();
