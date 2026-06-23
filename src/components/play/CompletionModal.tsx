@@ -69,7 +69,14 @@ export function CompletionModal({
   return (
     <>
     <Confetti active={open && won} accent={accent} />
-    <Modal open={open} onClose={onClose} labelledBy="complete-title" className="text-center">
+    <Modal
+      open={open}
+      onClose={onClose}
+      labelledBy="complete-title"
+      className="text-center"
+      showClose
+      closeLabel="Close — review the board"
+    >
       <div className="flex items-center justify-center gap-2">
         <span className="font-mono text-[11px] tracking-[0.2em]" style={{ color: accent.solid }}>
           {won ? eyebrow : "NICE TRY"}
