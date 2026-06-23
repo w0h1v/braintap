@@ -3,25 +3,34 @@
 import Link from "next/link";
 import type { GameMeta } from "@/lib/types";
 import { GameIcon } from "@/components/GameIcon";
+import { useProgress } from "@/lib/progress";
 import { cn } from "@/lib/cn";
 
 export function GameCard({
   meta,
   done,
   resultLabel,
+  showFavorite = true,
 }: {
   meta: GameMeta;
   done?: boolean;
   resultLabel?: string;
+  /** Show the favourite star toggle (hub only). */
+  showFavorite?: boolean;
 }) {
   const a = meta.accent;
+  const hydrated = useProgress((s) => s.hydrated);
+  const isFav = useProgress((s) => s.favorites.includes(meta.id));
+  const toggleFavorite = useProgress((s) => s.toggleFavorite);
+  // Only reflect the persisted star once hydrated, so SSR (empty) and the first
+  // client render agree — avoiding a hydration mismatch.
+  const fav = hydrated && isFav;
+
   return (
-    <Link
-      href={`/play/${meta.id}`}
+    <div
       className={cn(
-        "group flex min-h-[230px] flex-col rounded-[20px] border p-6 transition-all duration-300",
-        "hover:-translate-y-1.5",
-        "focus-visible:-translate-y-1.5",
+        "group relative flex min-h-[230px] flex-col rounded-[20px] border p-6 transition-all duration-300",
+        "hover:-translate-y-1.5 focus-within:-translate-y-1.5",
       )}
       style={{
         borderColor: `${a.solid}52`,
@@ -29,6 +38,14 @@ export function GameCard({
         boxShadow: done ? `inset 0 2px 0 ${a.solid}, 0 0 22px ${a.solid}14` : undefined,
       }}
     >
+      {/* Stretched link makes the whole card navigate; the star button below
+          sits above it (higher z) so it toggles without navigating. */}
+      <Link
+        href={`/play/${meta.id}`}
+        aria-label={`Play ${meta.name}`}
+        className="absolute inset-0 z-[1] rounded-[20px] outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+      />
+
       <div className="flex items-center justify-between">
         <div
           className="flex h-[42px] w-[42px] items-center justify-center rounded-xl border"
@@ -36,15 +53,32 @@ export function GameCard({
         >
           <GameIcon id={meta.icon} />
         </div>
-        <span
-          className="rounded-pill border px-2.5 py-1 font-mono text-[9.5px] tracking-[0.12em]"
-          style={{ color: a.soft, borderColor: `${a.solid}4d` }}
-        >
-          {meta.category}
-        </span>
+        {showFavorite && (
+          <button
+            type="button"
+            onClick={() => toggleFavorite(meta.id)}
+            aria-label={fav ? `Remove ${meta.name} from favourites` : `Add ${meta.name} to favourites`}
+            aria-pressed={fav}
+            title={fav ? "Remove from favourites" : "Add to favourites"}
+            className={cn(
+              "relative z-[2] flex h-9 w-9 items-center justify-center rounded-full text-[17px] leading-none outline-none transition-all",
+              "hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/40 active:scale-90",
+              fav ? "text-[#ffd66b]" : "text-ink-faint hover:text-ink-soft",
+            )}
+            style={fav ? { textShadow: "0 0 10px rgba(255,214,107,0.55)" } : undefined}
+          >
+            {fav ? "★" : "☆"}
+          </button>
+        )}
       </div>
 
-      <div className="mt-4 font-display text-xl font-semibold text-ink">{meta.name}</div>
+      <div
+        className="mt-3.5 font-mono text-[9.5px] tracking-[0.16em]"
+        style={{ color: a.soft }}
+      >
+        {meta.category}
+      </div>
+      <div className="mt-1 font-display text-xl font-semibold text-ink">{meta.name}</div>
       <div className="mt-1.5 flex-1 text-[13.5px] leading-relaxed text-ink-soft">
         {meta.tagline}
       </div>
@@ -67,6 +101,6 @@ export function GameCard({
           </span>
         )}
       </div>
-    </Link>
+    </div>
   );
 }
