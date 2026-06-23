@@ -1,7 +1,8 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import type { GameId } from "@/lib/types";
 import { GAME_ORDER, GAME_METAS } from "@/games/_meta";
-import { GameHost } from "@/components/play/GameHost";
+import { PlayClient } from "./PlayClient";
 
 const VALID = new Set<string>(GAME_ORDER);
 
@@ -20,21 +21,14 @@ export function generateMetadata({ params }: { params: { game: string } }) {
   };
 }
 
-export default function PlayPage({
-  params,
-  searchParams,
-}: {
-  params: { game: string };
-  searchParams: { date?: string };
-}) {
+export default function PlayPage({ params }: { params: { game: string } }) {
   if (!VALID.has(params.game)) notFound();
-  // Key by game + date so soft navigation between dates (archive browsing)
-  // fully remounts the host — resetting tier selection + timer for the new day.
+  // The archive ?date= param is read CLIENT-side (PlayClient) so this route is
+  // static-export compatible (output: "export" forbids server-side searchParams).
+  // The Suspense boundary is required for useSearchParams in a prerendered page.
   return (
-    <GameHost
-      key={`${params.game}:${searchParams.date ?? "today"}`}
-      gameId={params.game as GameId}
-      dateParam={searchParams.date}
-    />
+    <Suspense>
+      <PlayClient game={params.game as GameId} />
+    </Suspense>
   );
 }

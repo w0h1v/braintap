@@ -10,6 +10,9 @@ import { formatClock } from "@/lib/share";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useEntitlement } from "@/lib/entitlement";
+import { adsAvailable, showRewardedAd } from "@/lib/ads";
+import { getMonetizationConfig } from "@/lib/config";
 import {
   COLS,
   ROWS,
@@ -57,6 +60,7 @@ export function Strands({
   hostTimer = false,
 }: GameComponentProps<StrandsPuzzle, StrandsState>) {
   const saved = savedState ?? null;
+  const { isPremium } = useEntitlement();
   const targets = useMemo(() => [puzzle.spangram, ...puzzle.words], [puzzle]);
   const total = targets.length;
   // Hint generosity comes from the puzzle's difficulty tier (easy=3, medium=1,
@@ -82,6 +86,8 @@ export function Strands({
   const msgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completedRef = useRef(saved?.won ?? false);
+  // Guards the rewarded-ad hint flow against re-entrancy while an ad is showing.
+  const adInFlightRef = useRef(false);
 
   const clock = useGameClock(!won, saved?.elapsedMs ?? 0);
 
@@ -173,8 +179,18 @@ export function Strands({
   );
 
   /** Spend a hint: reveal one not-yet-found word by lighting its path cells. */
-  const useHint = useCallback(() => {
+  const useHint = useCallback(async () => {
     if (won || hintsUsed >= maxHints) return;
+    // MON-1: past the free threshold, a non-premium native user earns the hint
+    // by watching a rewarded ad. Inert on web (adsAvailable() is false), so the
+    // hint behaves exactly as before there. Ad fail → no hint, no penalty.
+    if (adsAvailable() && !isPremium && hintsUsed >= getMonetizationConfig().freeHintThreshold) {
+      if (adInFlightRef.current) return; // ignore taps while a rewarded ad is in flight
+      adInFlightRef.current = true;
+      const r = await showRewardedAd();
+      adInFlightRef.current = false;
+      if (r !== "rewarded") return;
+    }
     const hint = getHint(puzzle, found);
     if (!hint) return;
     const next = hintsUsed + 1;
@@ -193,7 +209,7 @@ export function Strands({
     if (hintTimer.current) clearTimeout(hintTimer.current);
     // Hold the highlight long enough to read, then clear (instant if reduced).
     hintTimer.current = setTimeout(() => setHintCells(new Set()), reducedMotion ? 1400 : 2200);
-  }, [won, hintsUsed, maxHints, puzzle, found, flash, reducedMotion]);
+  }, [won, hintsUsed, maxHints, puzzle, found, flash, reducedMotion, isPremium]);
 
   /** Resolve a completed selection path against the targets. */
   const resolvePath = useCallback(
