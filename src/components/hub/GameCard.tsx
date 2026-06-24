@@ -42,6 +42,10 @@ export function GameCard({
           sits above it (higher z) so it toggles without navigating. */}
       <Link
         href={`/play/${meta.id}`}
+        // Don't prefetch the game's (heavy) chunk just because a card is in view —
+        // it loads on navigation, behind the play-route skeleton. Keeps non-game
+        // pages from pulling game code / Brainle's dictionary in the background.
+        prefetch={false}
         aria-label={`Play ${meta.name}`}
         className="absolute inset-0 z-[1] rounded-[20px] outline-none focus-visible:ring-2 focus-visible:ring-white/40"
       />

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { ALL_GAMES, GAME_METAS, ROTATION } from "@/lib/games";
+import { GAME_METAS, GAME_ORDER, ROTATION } from "@/lib/games";
 import { GameCard } from "./GameCard";
 import { useProgress } from "@/lib/progress";
 import { todayISO } from "@/lib/daily";
@@ -30,8 +30,7 @@ export function RecommendedRail() {
 
     const ordered: GameId[] = [];
     if (featured && !todayResults[featured]) ordered.push(featured);
-    for (const g of ALL_GAMES) {
-      const id = g.meta.id;
+    for (const id of GAME_ORDER) {
       if (todayResults[id] || ordered.includes(id)) continue;
       ordered.push(id);
       if (ordered.length >= MAX_PICKS) break;
