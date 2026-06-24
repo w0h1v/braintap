@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ALL_GAMES, GAME_METAS, ROTATION, GAME_COUNT, GAME_COUNT_WORD } from "@/lib/games";
+import { GAME_METAS, ROTATION, GAME_COUNT, GAME_COUNT_WORD } from "@/lib/games";
 import { GAME_ORDER } from "@/games/_meta";
 import { GameCard } from "./GameCard";
 import { RecommendedRail } from "./RecommendedRail";
@@ -11,12 +11,14 @@ import { StatBox } from "@/components/ui/Card";
 import { useProgress, liveStreak } from "@/lib/progress";
 import { dateLabel, todayISO } from "@/lib/daily";
 import { SKILL_DOMAINS, SKILL_META } from "@/lib/skills";
-import type { GameId, SkillDomain } from "@/lib/types";
+import type { GameId, GameMeta, SkillDomain } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
 type SkillFilter = SkillDomain | "all";
 
 const TOTAL_GAMES = GAME_COUNT;
+/** Card metadata in hub display order — pure data, pulls in no game modules. */
+const GAMES: GameMeta[] = GAME_ORDER.map((id) => GAME_METAS[id]);
 
 function fmtTime(ms: number): string {
   const s = Math.round(ms / 1000);
@@ -63,22 +65,21 @@ export function Hub() {
   const favoriteGames = useMemo(() => {
     if (!hydrated || favorites.length === 0) return [];
     const fav = new Set(favorites);
-    return ALL_GAMES.filter((g) => fav.has(g.meta.id));
+    return GAME_ORDER.filter((id) => fav.has(id)).map((id) => GAME_METAS[id]);
   }, [hydrated, favorites]);
 
   // Skill-domain filter for the full grid.
   const [skill, setSkill] = useState<SkillFilter>("all");
   const filteredGames = useMemo(
-    () =>
-      skill === "all" ? ALL_GAMES : ALL_GAMES.filter((g) => g.meta.skills.includes(skill)),
+    () => (skill === "all" ? GAMES : GAMES.filter((m) => m.skills.includes(skill))),
     [skill],
   );
 
-  const renderCard = (g: (typeof ALL_GAMES)[number]) => {
-    const r = todayResults[g.meta.id];
+  const renderCard = (meta: GameMeta) => {
+    const r = todayResults[meta.id];
     const label =
       r?.shareText && r.shareText.length <= 5 ? r.shareText : r ? "Replay" : undefined;
-    return <GameCard key={g.meta.id} meta={g.meta} done={Boolean(r)} resultLabel={label} />;
+    return <GameCard key={meta.id} meta={meta} done={Boolean(r)} resultLabel={label} />;
   };
 
   return (
@@ -272,6 +273,7 @@ export function Hub() {
               <Link
                 key={d}
                 href={`/play/${gid}`}
+                prefetch={false}
                 className={cn(
                   "rounded-[14px] border p-3 text-center transition-colors",
                   isToday
