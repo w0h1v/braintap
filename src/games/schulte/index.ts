@@ -11,4 +11,8 @@ export default defineGame<SchultePuzzle, any>({
   Component: Schulte,
   validatePuzzle: validateSchulte,
   supportsDifficulty: true,
+  // Schulte owns its own clock; the host count-up chip started on a different
+  // signal and disagreed with the recorded time. Suppress it so Schulte shows
+  // its own live clock (the single source of truth).
+  hostTimer: false,
 });

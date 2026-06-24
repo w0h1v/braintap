@@ -9,6 +9,8 @@ import { prevDifficulty } from "./difficulty";
 export interface Settings {
   zen: boolean;
   sound: boolean;
+  /** Device vibration. Independent of `sound` so muted play keeps haptics. */
+  haptics: boolean;
 }
 
 export interface StoredResult extends GameResult {
@@ -77,7 +79,7 @@ export const useProgress = create<ProgressState>()(
   persist(
     (set, get) => ({
       hydrated: false,
-      settings: { zen: false, sound: true },
+      settings: { zen: false, sound: true, haptics: true },
       onboarded: false,
       results: {},
       tierResults: {},

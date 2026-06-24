@@ -322,6 +322,10 @@ export function Reversi({
   );
 
   const reset = useCallback(() => {
+    // Only a replay AFTER finishing is "practice" (won't re-record today). A
+    // "New game" tapped mid-round must start a fresh, still-recordable round —
+    // otherwise the real win can never register (completedRef gates finish()).
+    const wasDone = completedRef.current;
     if (aiTimer.current) clearTimeout(aiTimer.current);
     if (flipTimer.current) clearTimeout(flipTimer.current);
     aiRng.current = rngFromString(`reversi-ai:${dailySeed("reversi", dateISO)}`);
@@ -337,8 +341,8 @@ export function Reversi({
     setFlipping(new Set());
     setFlipColor(null);
     setPassNote(null);
-    setPractice(true); // already completed today; replay is practice
-    completedRef.current = true;
+    setPractice(wasDone); // replay-after-finish is practice; mid-round restart is not
+    completedRef.current = wasDone;
     setTurn(puzzle.firstTurn);
     if (puzzle.firstTurn === AI) scheduleAi(fresh);
   }, [dateISO, puzzle.firstTurn, scheduleAi]);

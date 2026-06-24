@@ -11,4 +11,7 @@ export default defineGame<SimonPuzzle, any>({
   Component: Simon,
   validatePuzzle: validateSimon,
   supportsDifficulty: true,
+  // Memory game with no time pressure — a host count-up timer chip misleads.
+  // (Simon renders no timer of its own; the run is still timed internally.)
+  hostTimer: false,
 });

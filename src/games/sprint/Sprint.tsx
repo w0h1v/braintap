@@ -97,6 +97,9 @@ export function Sprint({
 
   const deadlineRef = useRef<number | null>(null);
   const refillRef = useRef(refillPtr);
+  // Monotonic id for "+1" pops — Date.now() collides on same-ms scores (this is
+  // a speed game) which produced duplicate React keys.
+  const popId = useRef(0);
   const completedRef = useRef(false);
   const popTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -273,7 +276,7 @@ export function Sprint({
         const tp = setTimeout(() => setPopping(new Set()), 360);
         popTimers.current.push(tp);
         // Floating +1 badge.
-        const id = Date.now();
+        const id = ++popId.current;
         setScorePops((p) => [...p, id]);
         const ts = setTimeout(
           () => setScorePops((p) => p.filter((x) => x !== id)),
