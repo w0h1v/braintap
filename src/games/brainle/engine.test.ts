@@ -18,6 +18,7 @@ import {
 } from "./engine";
 import { DIFFICULTIES } from "@/lib/difficulty";
 import { ANSWERS, VALID, THEMED, HINTS } from "./words";
+import { EXTRA_GUESSES } from "./guesses";
 import { getDailyPuzzle } from "./generator";
 
 const START = "2025-01-01";
@@ -51,6 +52,16 @@ describe("brainle word bank", () => {
     for (const w of VALID) {
       expect(isWellFormed(w), `${w} malformed in valid set`).toBe(true);
     }
+  });
+
+  it("the generated guess dictionary is clean (locks the data against regeneration)", () => {
+    // VALID filters out malformed tokens, so assert the SOURCE data directly:
+    // every EXTRA_GUESSES entry must be exactly 5 uppercase letters, and unique.
+    expect(EXTRA_GUESSES.length).toBeGreaterThan(10000);
+    for (const w of EXTRA_GUESSES) {
+      expect(/^[A-Z]{5}$/.test(w), `${w} malformed in EXTRA_GUESSES`).toBe(true);
+    }
+    expect(new Set(EXTRA_GUESSES).size).toBe(EXTRA_GUESSES.length);
   });
 });
 
@@ -144,6 +155,21 @@ describe("brainle validation helpers", () => {
   it("isValidGuess requires presence in the dictionary", () => {
     expect(isValidGuess("BRAIN")).toBe(true);
     expect(isValidGuess("ZZZZZ")).toBe(false);
+  });
+
+  it("accepts common English words from the standard Wordle guess set", () => {
+    // Regression: AROSE (and friends) were rejected before the guess dictionary
+    // was expanded to the standard Wordle allowed set. They are not daily
+    // answers, but a Wordle veteran expects them to be guessable.
+    for (const w of ["AROSE", "ADIEU", "CRANE", "SLATE", "AUDIO", "ROAST", "POUND"]) {
+      expect(isValidGuess(w), `${w} should be an accepted guess`).toBe(true);
+    }
+  });
+
+  it("ships a substantial accepted-guess dictionary", () => {
+    // The standard Wordle allowed set is ~12.9k words; guard against the data
+    // module failing to load (which would silently shrink VALID to the bank).
+    expect(VALID.size).toBeGreaterThan(10000);
   });
 });
 

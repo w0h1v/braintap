@@ -20,6 +20,9 @@ import { useGameClock } from "@/lib/useGameClock";
 import { GameIcon } from "@/components/GameIcon";
 import { DifficultyContext } from "@/components/play/DifficultyContext";
 import { WinCelebration } from "@/components/play/WinCelebration";
+import { StreakCelebration } from "@/components/play/StreakCelebration";
+import { ACHIEVEMENT_BY_ID } from "@/lib/achievements";
+import { useToast } from "@/components/ui/Toast";
 import { maybeInterstitial } from "@/lib/ads";
 import { cn } from "@/lib/cn";
 
@@ -117,9 +120,18 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
     [tierMap],
   );
 
+  const toast = useToast();
+
   const [difficulty, setDifficulty] = useState<Difficulty>("easy");
   // Bumped on each win to (re)play the brief win-celebration beat.
   const [winBurst, setWinBurst] = useState(0);
+  // Bumped when the daily streak grows; `celebStreak` carries the new count.
+  const [streakBurst, setStreakBurst] = useState(0);
+  const [celebStreak, setCelebStreak] = useState(0);
+  // Pending achievement-toast timers, cleared on unmount so a staggered burst
+  // never pops on a later page if the player leaves right after finishing.
+  const toastTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(() => () => toastTimers.current.forEach(clearTimeout), []);
   // Normalised score of the most recent completion (drives the modal rank).
   const [lastScore, setLastScore] = useState<number | null>(null);
   // Pre-game brain-insight teaser, dismissible for the session (VIS-5).
@@ -174,13 +186,41 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
       const finalResult: GameResult = supportsDiff
         ? { ...result, timeMs: result.timeMs ?? fallback }
         : result;
+
+      // Snapshot before/after so we can detect a streak bump and freshly-earned
+      // achievements (recordResult derives both synchronously in the store).
+      const before = useProgress.getState();
       recordResult(gameId, dateISO, finalResult, !isArchive, activeDiff);
+      const after = useProgress.getState();
+
       // A short celebratory beat just before the game's completion modal rises.
       if (result.status === "won") setWinBurst((n) => n + 1);
       setLastScore(typeof result.score === "number" ? result.score : null);
+
+      // The streak just grew: celebrate it — but only on a WIN, so the festive
+      // pill never lands over a "NICE TRY" loss modal. The streak still
+      // increments silently in the store either way.
+      if (result.status === "won" && after.currentStreak > before.currentStreak) {
+        setCelebStreak(after.currentStreak);
+        setStreakBurst((n) => n + 1);
+      }
+
+      // Toast any achievements that just unlocked, lightly staggered so a burst
+      // (e.g. on a clean sweep) reads as a sequence rather than a pile.
+      const fresh = after.achievements.filter((id) => !before.achievements.includes(id));
+      fresh.forEach((id, i) => {
+        const a = ACHIEVEMENT_BY_ID[id];
+        if (!a) return;
+        const t = setTimeout(
+          () => toast.show(`${a.emoji} Achievement unlocked — ${a.title}`, { durationMs: 4200 }),
+          i * 450,
+        );
+        toastTimers.current.push(t);
+      });
+
       void syncProgress();
     },
-    [recordResult, gameId, dateISO, isArchive, activeDiff, supportsDiff, showHostTimer],
+    [recordResult, gameId, dateISO, isArchive, activeDiff, supportsDiff, showHostTimer, toast],
   );
 
   const onPersistState = useCallback(
@@ -240,6 +280,7 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
   return (
     <div className="mx-auto max-w-shell px-4 pt-24 pb-[max(4rem,env(safe-area-inset-bottom))] sm:px-6">
       <WinCelebration trigger={winBurst} accent={meta.accent} reducedMotion={Boolean(reducedMotion)} />
+      <StreakCelebration trigger={streakBurst} streak={celebStreak} reducedMotion={Boolean(reducedMotion)} />
       {/* header */}
       <div className="mb-4 flex items-center justify-between gap-3">
         <Link

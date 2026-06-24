@@ -57,7 +57,7 @@ export function StatBox({
     <div className="rounded-2xl border border-line bg-gradient-to-b from-[rgba(15,23,46,0.55)] to-[rgba(8,12,26,0.5)] p-4 text-center sm:p-5">
       <div className="font-display text-2xl font-semibold sm:text-3xl" style={{ color }}>
         {value}
-        {sub ? <span className="text-base text-ink-faint">{sub}</span> : null}
+        {sub ? <span className="text-base text-ink-mute">{sub}</span> : null}
       </div>
       <div className="mt-1 font-mono text-[10px] tracking-[0.12em] text-ink-mute sm:text-[10.5px]">
         {label}

@@ -130,11 +130,13 @@ export default function LeaderboardPage() {
     return 70 + (liveTarget % 40);
   }, [liveTarget]);
 
-  // The player's own recorded result for the selected game + tier today. Shown
-  // in the coming-soon state so they can see their score is already tracked.
+  // The player's own WINNING result for the selected game + tier today. Only a
+  // win earns the solo "you're #1" pace-setter board; a loss/played result
+  // falls through to the "be the first" CTA so we never crown a failed run.
   const myResult = useMemo(() => {
     const tiers = tierResults[today]?.[selected];
-    return tiers?.[tier] ?? (tiers ? undefined : results[today]?.[selected]) ?? null;
+    const r = tiers?.[tier] ?? (tiers ? undefined : results[today]?.[selected]) ?? null;
+    return r && r.status === "won" ? r : null;
   }, [tierResults, results, today, selected, tier]);
 
   return (
@@ -293,28 +295,55 @@ export default function LeaderboardPage() {
                 />
               ))
             ) : entries.length === 0 ? (
-              <div className="rounded-2xl border border-line bg-white/[0.02] p-7 text-center">
-                <div className="text-2xl" aria-hidden>
-                  🏆
-                </div>
-                <h3 className="mt-2 font-display text-lg font-semibold text-ink">
-                  Leaderboards are coming soon
-                </h3>
-                <p className="mx-auto mt-2 max-w-[360px] text-sm leading-relaxed text-ink-mute">
-                  Global rankings go live once enough players have tapped in. Your
-                  results are already being saved — play today and you&apos;ll be on
-                  the board the moment it opens.
-                </p>
-                {myResult ? (
-                  <div className="mx-auto mt-4 flex max-w-[300px] items-center justify-between gap-3 rounded-xl border border-cyan/25 bg-cyan/[0.08] px-4 py-2.5">
-                    <span className="font-mono text-[10.5px] tracking-[0.1em] text-cyan-soft">
-                      YOUR {DIFFICULTY_META[tier].label.toUpperCase()} RESULT
+              myResult ? (
+                // You've played but no global rows are in yet — you ARE the board.
+                <>
+                  <div className="flex items-center gap-3 rounded-xl border border-cyan/30 bg-cyan/[0.08] px-3.5 py-2.5">
+                    <span
+                      className="w-7 shrink-0 text-center font-mono text-[13px] font-semibold tabular-nums"
+                      style={{ color: "#00e5ff" }}
+                    >
+                      1
                     </span>
-                    <span className="font-mono text-[12px] text-ink">
-                      {myResult.timeMs ? fmtTime(myResult.timeMs) : "—"} · {myResult.score} pts
+                    <span className="min-w-0 flex-1 truncate font-display text-sm font-semibold text-cyan">
+                      You
+                    </span>
+                    <span className="shrink-0 font-mono text-[11px] text-ink-mute">
+                      {fmtTime(myResult.timeMs)}
+                    </span>
+                    <span
+                      className="w-12 shrink-0 text-right font-mono text-[12px] font-semibold tabular-nums"
+                      style={{ color: "#00e5ff" }}
+                    >
+                      {myResult.score}
                     </span>
                   </div>
-                ) : (
+                  <div className="mt-3 rounded-xl border border-line bg-white/[0.02] p-4 text-center">
+                    <div className="text-lg" aria-hidden>
+                      🚀
+                    </div>
+                    <h3 className="mt-1 font-display text-[15px] font-semibold text-ink">
+                      You&apos;re setting today&apos;s pace
+                    </h3>
+                    <p className="mx-auto mt-1 max-w-[340px] text-[13px] leading-relaxed text-ink-mute">
+                      First on the {DIFFICULTY_META[tier].label} board for {meta.name}. Others
+                      rank in behind you as they tap in today.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                // No one (incl. you) has posted a time for this game/tier today.
+                <div className="rounded-2xl border border-line bg-white/[0.02] p-7 text-center">
+                  <div className="text-2xl" aria-hidden>
+                    🏆
+                  </div>
+                  <h3 className="mt-2 font-display text-lg font-semibold text-ink">
+                    Be the first on the board
+                  </h3>
+                  <p className="mx-auto mt-2 max-w-[360px] text-sm leading-relaxed text-ink-mute">
+                    No times are posted for {meta.name} yet today. Play now and you&apos;ll take
+                    the top spot — everyone else ranks in behind you as they play.
+                  </p>
                   <Link
                     href={`/play/${selected}`}
                     className="mt-4 inline-block rounded-xl px-4 py-2 font-display text-sm font-semibold text-[#04060f]"
@@ -322,8 +351,8 @@ export default function LeaderboardPage() {
                   >
                     Play {meta.name} →
                   </Link>
-                )}
-              </div>
+                </div>
+              )
             ) : (
               entries.map((e) => (
                 <div

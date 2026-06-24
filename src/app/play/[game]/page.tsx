@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import type { GameId } from "@/lib/types";
 import { GAME_ORDER, GAME_METAS } from "@/games/_meta";
+import { PlaySkeleton } from "@/components/play/PlaySkeleton";
 import { PlayClient } from "./PlayClient";
 
 const VALID = new Set<string>(GAME_ORDER);
@@ -25,9 +26,10 @@ export default function PlayPage({ params }: { params: { game: string } }) {
   if (!VALID.has(params.game)) notFound();
   // The archive ?date= param is read CLIENT-side (PlayClient) so this route is
   // static-export compatible (output: "export" forbids server-side searchParams).
-  // The Suspense boundary is required for useSearchParams in a prerendered page.
+  // The Suspense boundary is required for useSearchParams in a prerendered page;
+  // the skeleton fallback fills the client-side bailout so there's no blank flash.
   return (
-    <Suspense>
+    <Suspense fallback={<PlaySkeleton />}>
       <PlayClient game={params.game as GameId} />
     </Suspense>
   );

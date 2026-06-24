@@ -20,9 +20,11 @@ const config: Config = {
         },
         ink: {
           DEFAULT: "#f3f7ff",
-          soft: "rgba(226,234,255,0.6)",
-          mute: "rgba(226,234,255,0.45)",
-          faint: "rgba(226,234,255,0.3)",
+          soft: "rgba(226,234,255,0.62)",
+          mute: "rgba(226,234,255,0.5)",
+          // Lifted from 0.3 → 0.4: the weakest secondary token was technically
+          // AA-pass but read as low-contrast at the small mono sizes it's used at.
+          faint: "rgba(226,234,255,0.4)",
         },
         line: {
           DEFAULT: "rgba(255,255,255,0.08)",

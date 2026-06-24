@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Card, StatBox } from "@/components/ui/Card";
 import { Button, GhostButton } from "@/components/ui/Button";
+import { AchievementsGrid } from "@/components/AchievementsGrid";
 import { useAuth } from "@/lib/auth";
 import { useProgress, liveStreak } from "@/lib/progress";
 
@@ -143,6 +144,12 @@ export default function ProfilePage() {
               </div>
             </Card>
           </>
+        )}
+
+        {hydrated && (
+          <div className="mt-7">
+            <AchievementsGrid />
+          </div>
         )}
       </div>
     </section>

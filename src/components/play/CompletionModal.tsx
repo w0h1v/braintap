@@ -30,6 +30,27 @@ function withTier(text: string | undefined, tier: Difficulty | undefined): strin
   return `${head} · ${label}${rest}`;
 }
 
+/** Large coloured square emojis used by the games' share grids. */
+const SQUARE = /[\u{1F7E5}-\u{1F7EB}⬛⬜]/u;
+
+/**
+ * Pull the emoji-grid lines out of a BrainTap share string so the result is
+ * tangible in the modal (and the Share buttons obviously meaningful) without
+ * revealing the answer. Used only when a game doesn't already render its own
+ * grid via `extra`. The `!/[A-Za-z0-9]/` filter drops label rows (e.g. a share
+ * header or "🟪 6×6 deduction"); requiring ≥2 grid lines avoids surfacing a
+ * single-row score "bar" (sprint/mathsprint) as if it were a grid. Returns null
+ * when the share has no real grid (e.g. word games).
+ */
+function extractGrid(text: string | undefined): string | null {
+  if (!text) return null;
+  const lines = text.split("\n").filter((l) => {
+    const t = l.trim();
+    return t.length > 0 && !/[A-Za-z0-9]/.test(t) && SQUARE.test(t);
+  });
+  return lines.length >= 2 ? lines.join("\n") : null;
+}
+
 export function CompletionModal({
   open,
   onClose,
@@ -68,6 +89,10 @@ export function CompletionModal({
   // Performance rank revealed on a win, from the normalised score (VIS-3).
   const rank = won && nav?.lastScore != null ? rankForScore(nav.lastScore) : null;
   const tierShare = withTier(share, tier);
+  // Spoiler-free emoji grid, shown only on a WIN and only when the game didn't
+  // supply its own result content via `extra` (avoids duplicating
+  // brainle/connections grids and never shows a "positive" bar under a loss).
+  const gridPreview = won && !extra ? extractGrid(tierShare) : null;
   // Offer the next tier from inside the modal on a win — it's where attention is.
   const showProgress = won && Boolean(tier);
 
@@ -131,14 +156,27 @@ export function CompletionModal({
             {statValue}
           </div>
           {statLabel && (
-            <div className="font-mono text-[11px] tracking-[0.1em] text-ink-faint">
+            <div className="font-mono text-[11px] tracking-[0.1em] text-ink-mute">
               {statLabel}
             </div>
           )}
         </>
       )}
 
-      {extra && <div className="mt-4">{extra}</div>}
+      {extra ? (
+        <div className="mt-4">{extra}</div>
+      ) : gridPreview ? (
+        <div className="mt-4 flex justify-center">
+          <div className="rounded-2xl border border-line bg-white/[0.02] px-5 py-3 text-center">
+            <pre className="font-mono text-[19px] leading-[1.15]" aria-hidden>
+              {gridPreview}
+            </pre>
+            <div className="mt-1.5 font-mono text-[9px] tracking-[0.16em] text-ink-mute">
+              SPOILER-FREE RESULT
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {insight && (
         <div
