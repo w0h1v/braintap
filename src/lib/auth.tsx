@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { User } from "@supabase/supabase-js";
+import { Capacitor } from "@capacitor/core";
 import { getSupabaseBrowser, isSupabaseConfigured } from "./supabase/client";
 
 export interface AuthState {
@@ -26,6 +27,7 @@ export interface AuthState {
     username?: string,
   ) => Promise<{ error?: string; needsConfirmation?: boolean }>;
   signInWithGoogle: () => Promise<{ error?: string }>;
+  signInWithApple: () => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
 }
 
@@ -104,8 +106,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithGoogle = useCallback<AuthState["signInWithGoogle"]>(async () => {
     if (!supabase) return { error: "Accounts are not configured." };
+    // Native: the web OAuth redirect (and /auth/callback) don't exist in the
+    // Capacitor build, so use the native id-token flow. Web: unchanged redirect.
+    if (Capacitor.isNativePlatform()) {
+      const { signInGoogleNative } = await import("./native/exchange");
+      return signInGoogleNative(supabase);
+    }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
+      options: { redirectTo: `${siteUrl()}/auth/callback` },
+    });
+    return error ? { error: error.message } : {};
+  }, [supabase]);
+
+  const signInWithApple = useCallback<AuthState["signInWithApple"]>(async () => {
+    if (!supabase) return { error: "Accounts are not configured." };
+    if (Capacitor.isNativePlatform()) {
+      const { signInAppleNative } = await import("./native/exchange");
+      return signInAppleNative(supabase);
+    }
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "apple",
       options: { redirectTo: `${siteUrl()}/auth/callback` },
     });
     return error ? { error: error.message } : {};
@@ -128,9 +149,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithPassword,
       signUpWithPassword,
       signInWithGoogle,
+      signInWithApple,
       signOut,
     };
-  }, [user, loading, signInWithPassword, signUpWithPassword, signInWithGoogle, signOut]);
+  }, [user, loading, signInWithPassword, signUpWithPassword, signInWithGoogle, signInWithApple, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
