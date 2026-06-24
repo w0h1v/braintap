@@ -261,33 +261,35 @@ export function Crossword({
       }
       const target = selected;
       const runCells = activeEntry?.cells;
-      setLetters((prev) => {
-        const nextArr = prev.slice();
-        nextArr[target] = L;
-        // Detect: did this keystroke just complete the active run correctly?
-        let runJustSolved = false;
-        if (runCells) {
-          runJustSolved = runCells.every((c) => nextArr[c] === solution[c]);
+      // Compute the next grid purely, then apply it and run feedback OUTSIDE the
+      // updater (updaters must be pure — StrictMode double-invokes them in dev,
+      // which would double-fire the sound/pop timer).
+      const nextArr = letters.slice();
+      nextArr[target] = L;
+      const runJustSolved = !!runCells && runCells.every((c) => nextArr[c] === solution[c]);
+      const gridComplete = isSolved(nextArr, solution, block);
+
+      setLetters(nextArr);
+
+      if (runJustSolved && !gridComplete) {
+        // Per-run cue — suppressed when this keystroke also completes the whole
+        // grid, so finish() owns the single terminal win cue (no double sound).
+        sfx.correct();
+        haptics.win();
+        if (!reducedMotion && runCells) {
+          const popped = new Set(runCells);
+          setPoppedCells(popped);
+          if (popTimer.current) clearTimeout(popTimer.current);
+          popTimer.current = setTimeout(() => setPoppedCells(new Set()), 360);
         }
-        if (runJustSolved) {
-          sfx.correct();
-          haptics.win();
-          if (!reducedMotion && runCells) {
-            const popped = new Set(runCells);
-            setPoppedCells(popped);
-            if (popTimer.current) clearTimeout(popTimer.current);
-            popTimer.current = setTimeout(() => setPoppedCells(new Set()), 360);
-          }
-        } else {
-          sfx.place();
-          haptics.success();
-        }
-        queueMicrotask(() => tryComplete(nextArr));
-        return nextArr;
-      });
+      } else if (!runJustSolved) {
+        sfx.place();
+        haptics.success();
+      }
+      queueMicrotask(() => tryComplete(nextArr));
       advance(target);
     },
-    [won, selected, block, hintCells, advance, tryComplete, activeEntry, solution, reducedMotion],
+    [won, selected, block, hintCells, advance, tryComplete, activeEntry, solution, reducedMotion, letters],
   );
 
   const backspace = useCallback(() => {
@@ -572,6 +574,8 @@ export function Crossword({
           boxShadow: `0 18px 50px -20px ${ACCENT.solid}59, inset 0 0 40px -28px ${ACCENT.solid}`,
         }}
         role="grid"
+        aria-rowcount={size}
+        aria-colcount={size}
         aria-label={`Crossword grid, ${size} by ${size}`}
       >
         {Array.from({ length: size }, (_, r) => (

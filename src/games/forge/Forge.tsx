@@ -229,46 +229,44 @@ export function Forge({
   const toggleFill = useCallback(
     (i: number) => {
       if (won) return;
-      setCells((prev) => {
-        const next = prev.slice() as Cell[];
-        next[i] = next[i] === 1 ? 0 : 1;
-        pushHistory(prev);
-        if (next[i] === 1) {
-          // A fill that breaks a clue is a mistake: reserve the celebratory
-          // place/success cue for plausibly-correct fills only.
-          if (fillBreaksClue(next, i)) {
-            flagError(i);
-          } else {
-            sfx.place();
-            haptics.success();
-          }
+      // Compute next outside the updater so setCells stays pure (StrictMode
+      // double-invokes updaters in dev, which double-pushed the undo stack).
+      const next = cells.slice() as Cell[];
+      next[i] = next[i] === 1 ? 0 : 1;
+      pushHistory(cells);
+      setCells(next);
+      if (next[i] === 1) {
+        // A fill that breaks a clue is a mistake: reserve the celebratory
+        // place/success cue for plausibly-correct fills only.
+        if (fillBreaksClue(next, i)) {
+          flagError(i);
         } else {
-          sfx.tap();
-          haptics.tap();
+          sfx.place();
+          haptics.success();
         }
-        queueMicrotask(() => checkSolved(next));
-        return next;
-      });
+      } else {
+        sfx.tap();
+        haptics.tap();
+      }
+      queueMicrotask(() => checkSolved(next));
     },
-    [won, checkSolved, pushHistory, fillBreaksClue, flagError],
+    [won, cells, checkSolved, pushHistory, fillBreaksClue, flagError],
   );
 
   // Toggle mark-empty (right-click / mark mode / long-press). Empty <-> marked.
   const toggleMark = useCallback(
     (i: number) => {
       if (won) return;
-      setCells((prev) => {
-        const next = prev.slice() as Cell[];
-        // Never clobber a filled cell with a mark.
-        if (next[i] === 1) return prev;
-        next[i] = next[i] === 2 ? 0 : 2;
-        pushHistory(prev);
-        sfx.tap();
-        haptics.tap();
-        return next;
-      });
+      // Never clobber a filled cell with a mark.
+      if (cells[i] === 1) return;
+      const next = cells.slice() as Cell[];
+      next[i] = next[i] === 2 ? 0 : 2;
+      pushHistory(cells);
+      setCells(next);
+      sfx.tap();
+      haptics.tap();
     },
-    [won, pushHistory],
+    [won, cells, pushHistory],
   );
 
   // Undo the most recent board-mutating action.
@@ -287,15 +285,13 @@ export function Forge({
   // Clear the whole board back to empty (after confirming a non-empty board).
   const clearBoard = useCallback(() => {
     if (won) return;
-    setCells((prev) => {
-      if (prev.every((v) => v === 0)) return prev;
-      pushHistory(prev);
-      return new Array(CELLS).fill(0) as Cell[];
-    });
     setConfirmClear(false);
+    if (cells.every((v) => v === 0)) return; // nothing to clear
+    pushHistory(cells);
+    setCells(new Array(CELLS).fill(0) as Cell[]);
     sfx.tap();
     haptics.tap();
-  }, [won, CELLS, pushHistory]);
+  }, [won, cells, CELLS, pushHistory]);
 
   const onClearClick = useCallback(() => {
     if (won) return;
@@ -444,13 +440,12 @@ export function Forge({
         case "Backspace":
         case "Delete":
         case "0":
-          setCells((prev) => {
-            if (prev[selected] === 0) return prev;
-            pushHistory(prev);
-            const next = prev.slice() as Cell[];
+          if (cells[selected] !== 0) {
+            pushHistory(cells);
+            const next = cells.slice() as Cell[];
             next[selected] = 0;
-            return next;
-          });
+            setCells(next);
+          }
           e.preventDefault();
           break;
         case "u":
@@ -464,7 +459,7 @@ export function Forge({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [won, started, markMode, selected, move, toggleFill, toggleMark, begin, undo, pushHistory]);
+  }, [won, started, markMode, selected, cells, move, toggleFill, toggleMark, begin, undo, pushHistory]);
 
   // Per-line completion (for clue dimming) + overall progress.
   const { rowDone, colDone, progress } = useMemo(() => {

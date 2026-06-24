@@ -241,6 +241,7 @@ export function Sprint({
     setShowModal(false);
     setPopping(new Set());
     setScorePops([]);
+    setOverBy(0); // clear any leftover overshoot badge from a prior round
     setLiveStatus(`Sprint started. First target ${puzzle.firstTarget}.`);
     setPhase("playing");
     haptics.tap();
@@ -289,6 +290,7 @@ export function Sprint({
   // Explicit, no-penalty clear of the current selection during play.
   const clearSelection = useCallback(() => {
     if (phase !== "playing") return;
+    setOverBy(0); // dismiss any lingering "over by N" badge
     setSelected((prev) => {
       if (prev.size === 0) return prev;
       haptics.tap();
@@ -349,6 +351,9 @@ export function Sprint({
       if (phase !== "playing") return;
       // Ignore taps while a match/overshoot is mid-resolution (double-tap race).
       if (resolvingRef.current) return;
+      // A fresh tap dismisses a stale "over by N" badge; if THIS tap overshoots,
+      // undoOvershoot's queued microtask re-sets overBy after this runs.
+      setOverBy(0);
       setSelected((prev) => {
         const next = new Set(prev);
         if (next.has(i)) next.delete(i);

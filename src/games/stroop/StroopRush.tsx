@@ -74,7 +74,9 @@ export function StroopRush({
   // Transient penalty flag → drives the "-2s" float + SECONDS card pulse.
   const [penalty, setPenalty] = useState(false);
   // Fired once when `correct` first reaches the tier goal (micro-celebration).
-  const [goalHit, setGoalHit] = useState(false);
+  // Seed it true when resuming a round already at/past the goal, so the cue
+  // isn't "missed" waiting for an exact correct===goal transition that won't recur.
+  const [goalHit, setGoalHit] = useState(() => resumable && saved!.correct >= params.goal);
   // Per-tier personal best (correct count), loaded from storage.
   const [best, setBest] = useState<number | null>(null);
   // True for the just-finished round when it beat the stored best.
@@ -481,8 +483,9 @@ export function StroopRush({
       <p className="sr-only" role="status" aria-live="polite">
         {liveStatus}
       </p>
-      {/* assertive region: announces each new trial's ink for eyes-free play */}
-      <p className="sr-only" role="status" aria-live="assertive">
+      {/* announces each new trial's ink for eyes-free play. role="alert" implies
+          assertive + atomic — avoids the role="status"(polite)/assertive conflict. */}
+      <p className="sr-only" role="alert" aria-atomic="true">
         {trialStatus}
       </p>
 

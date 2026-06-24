@@ -49,6 +49,8 @@ interface ConnectionsState {
    * auto-revealed on a loss and must NOT read as celebratory solves.
    */
   earnedCount: number;
+  /** True when the loss was a voluntary give-up, not running out of guesses. */
+  gaveUp?: boolean;
   /** Each guess recorded as group-index per word, for the emoji share grid. */
   history: number[][];
   mistakes: number;
@@ -107,13 +109,20 @@ export function Connections({
     () => saved?.solvedOrder ?? [],
   );
   // How many entries of `solvedOrder` the player actually earned. On a resumed
-  // loss with no stored value, fall back to the count of genuinely-solved groups
-  // implied by the result (lost states reveal the rest), else trust the array.
-  const [earnedCount, setEarnedCount] = useState<number>(
-    () =>
-      saved?.earnedCount ??
-      (saved?.status === "lost" ? 0 : saved?.solvedOrder?.length ?? 0),
-  );
+  // For a legacy loss with no stored earnedCount, approximate it from how many
+  // groups were genuinely earned — correct guesses (a history row that is all one
+  // group) plus hint-revealed groups — rather than crediting 0, which would
+  // mislabel real solves as "revealed". New saves store the exact value.
+  const [earnedCount, setEarnedCount] = useState<number>(() => {
+    if (saved?.earnedCount != null) return saved.earnedCount;
+    if (saved?.status !== "lost") return saved?.solvedOrder?.length ?? 0;
+    const correctGuesses = (saved.history ?? []).filter(
+      (row) => row.length > 0 && row.every((g) => g === row[0]),
+    ).length;
+    return Math.min(GROUP_COUNT, correctGuesses + (saved.hintsUsed ?? 0));
+  });
+  // Whether a loss was a voluntary give-up (distinct end-of-game copy).
+  const [gaveUp, setGaveUp] = useState<boolean>(saved?.gaveUp ?? false);
   const [history, setHistory] = useState<number[][]>(() => saved?.history ?? []);
   const [mistakes, setMistakes] = useState<number>(() => saved?.mistakes ?? 0);
   const [hintsUsed, setHintsUsed] = useState<number>(() => saved?.hintsUsed ?? 0);
@@ -168,13 +177,14 @@ export function Connections({
       remaining,
       solvedOrder,
       earnedCount,
+      gaveUp,
       history,
       mistakes,
       hintsUsed,
       status,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remaining, solvedOrder, earnedCount, history, mistakes, hintsUsed, status]);
+  }, [remaining, solvedOrder, earnedCount, gaveUp, history, mistakes, hintsUsed, status]);
 
   // Clean up the message timer on unmount.
   useEffect(() => {
@@ -406,6 +416,7 @@ export function Connections({
       .filter((i) => !solvedOrder.includes(i));
     const finalSolved = [...solvedOrder, ...revealed];
     setEarnedCount(solvedOrder.length);
+    setGaveUp(true);
     setSolvedOrder(finalSolved);
     setRemaining([]);
     setSelected([]);
@@ -615,7 +626,9 @@ export function Connections({
       >
         {message ||
           (lost
-            ? "Out of guesses — solution revealed"
+            ? gaveUp
+              ? "Answers revealed"
+              : "Out of guesses — solution revealed"
             : won
               ? "All four groups found!"
               : selectionFull
@@ -638,6 +651,7 @@ export function Connections({
               return (
                 <div
                   key={g.label}
+                  role="group"
                   className={cn(
                     "rounded-xl px-3 py-2.5",
                     !revealedNotSolved && isFresh && "animate-solve",

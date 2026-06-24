@@ -287,8 +287,9 @@ export function Slide({
     });
   }, [won]);
 
-  // Reset the current attempt back to the scrambled start (keeps the timer
-  // running so it stays an honest "this attempt" clock). Best is preserved.
+  // Reset the current attempt back to the scrambled start: zero the clock and
+  // pause it until the next move re-anchors it, so it reads as an honest fresh
+  // "this attempt" clock starting from the first move. Best is preserved.
   const reset = useCallback(() => {
     if (completedRef.current) return;
     setBoard(puzzle.start.slice());
