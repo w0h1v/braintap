@@ -42,6 +42,8 @@ export function CompletionModal({
   share,
   extra,
   won = true,
+  onReplay,
+  replayLabel = "Play again",
 }: {
   open: boolean;
   onClose: () => void;
@@ -54,6 +56,9 @@ export function CompletionModal({
   share?: string;
   extra?: ReactNode;
   won?: boolean;
+  /** When provided, renders a "Play again" action that replays the same tier. */
+  onReplay?: () => void;
+  replayLabel?: string;
 }) {
   const [shareLabel, setShareLabel] = useState("Share result");
   const [imageLabel, setImageLabel] = useState("Share image");
@@ -214,6 +219,16 @@ export function CompletionModal({
       >
         {imageLabel}
       </button>
+
+      {onReplay && (
+        <button
+          type="button"
+          onClick={onReplay}
+          className="mt-2.5 w-full rounded-xl border border-line-strong bg-white/[0.04] py-3 font-display text-sm font-semibold text-[#eaf1ff]"
+        >
+          ↻ {replayLabel}
+        </button>
+      )}
 
       <Link
         href="/"

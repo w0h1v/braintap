@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { GameComponentProps } from "@/lib/types";
 import { GAME_METAS } from "@/games/_meta";
@@ -121,6 +122,15 @@ interface PipsState {
 }
 
 const MAX_HISTORY = 60;
+
+/** Solve-time thresholds (seconds) for the 3 / 2 / 1 star awards. Shared so the
+ *  live "soft goal" hint and the final scoring agree. */
+const STAR_SECONDS = { three: 60, two: 150 } as const;
+
+/** Stars earned for a given solve time (seconds). */
+function starsFor(sec: number): number {
+  return sec < STAR_SECONDS.three ? 3 : sec < STAR_SECONDS.two ? 2 : 1;
+}
 
 function emptyState(dominoCount: number): PipsState {
   return {
@@ -261,6 +271,13 @@ export function Pips({
   const [pendingFlip, setPendingFlip] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [invalidCell, setInvalidCell] = useState<number | null>(null);
+  // Final solve stats, captured at win, surfaced in the completion modal.
+  const [result, setResult] = useState<{
+    stars: number;
+    score: number;
+    moves: number;
+    hints: number;
+  } | null>(null);
   const adInFlightRef = useRef(false);
 
   const { placed, locked, hintsUsed, won, moves } = state;
@@ -324,7 +341,8 @@ export function Pips({
         40,
         100 - Math.floor(sec / 6) - extraMoves * 3 - finalHints * 12,
       );
-      const stars = sec < 60 ? 3 : sec < 150 ? 2 : 1;
+      const stars = starsFor(sec);
+      setResult({ stars, score, moves: finalMoves, hints: finalHints });
       setShowModal(false);
       setTimeout(() => setShowModal(true), reducedMotion ? 0 : 320);
       onComplete({
@@ -460,10 +478,11 @@ export function Pips({
         }
       }
       if (partner < 0) {
-        // No room next to this cell — flash it and bail.
+        // No room next to this cell — flash it and bail with a distinctly
+        // "wrong" cue so an illegal move doesn't feel like a normal tap.
         setInvalidCell(cell);
-        sfx.tap();
-        haptics.tap();
+        sfx.wrong();
+        haptics.error();
         setTimeout(() => setInvalidCell(null), reducedMotion ? 0 : 320);
         return;
       }
@@ -540,6 +559,22 @@ export function Pips({
     });
   }, [won, puzzle.solution, DOMINOES]);
 
+  // Full replay of the same board: clear everything (including hint-locks),
+  // reset the clock, and re-arm play. Used by the won-board "Play again" hooks.
+  const replayPuzzle = useCallback(() => {
+    setSelected(null);
+    setOrient("h");
+    setPendingFlip(false);
+    setInvalidCell(null);
+    setResult(null);
+    setShowModal(false);
+    sfx.tap();
+    haptics.tap();
+    clock.reset(0);
+    clock.start();
+    setState(emptyState(DOMINOES));
+  }, [clock, DOMINOES]);
+
   const allPlacedCorrectly = useMemo(
     () => getHint(puzzle, placement) == null,
     [puzzle, placement],
@@ -604,6 +639,9 @@ export function Pips({
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo, rotate, flipPending, selected]);
 
+  // Stars currently "on pace" for, given elapsed time (soft live goal).
+  const liveStars = starsFor(Math.round(clock.ms / 1000));
+
   const status = won
     ? "Solved! Every region is satisfied."
     : selected != null
@@ -629,7 +667,7 @@ export function Pips({
       )}
 
       {/* Heading row */}
-      <div className="mb-2 flex w-full items-center justify-between">
+      <div className="mb-1 flex w-full items-center justify-between">
         <span className="font-mono text-[10px] tracking-[0.16em] text-ink-faint">
           FILL EVERY REGION
         </span>
@@ -637,6 +675,25 @@ export function Pips({
           {metCount}/{totalRegions} satisfied
         </span>
       </div>
+
+      {/* Live star goal — a soft target so a fast solve feels earned. */}
+      {!won && (
+        <div
+          className="mb-2 flex w-full items-center justify-between font-mono text-[10px] tracking-[0.08em] text-ink-mute"
+          aria-hidden
+        >
+          <span className="tabular-nums" style={{ color: liveStars === 3 ? MET : undefined }}>
+            {"★".repeat(liveStars)}
+            <span className="text-ink-faint">{"☆".repeat(3 - liveStars)}</span>
+            <span className="ml-1.5 text-ink-faint">on pace</span>
+          </span>
+          <span className="text-ink-faint">
+            {liveStars > 1
+              ? `★★★ under ${STAR_SECONDS.three}s · ★★ under ${STAR_SECONDS.two}s`
+              : "solve faster for more stars"}
+          </span>
+        </div>
+      )}
 
       {/* Board */}
       <div
@@ -677,7 +734,7 @@ export function Pips({
               type="button"
               role="gridcell"
               onClick={() => onCellTap(i)}
-              disabled={won && !covered}
+              disabled={won}
               aria-label={cellLabel(i, cell, g, c, covered, faceVal, isLocked, region.met)}
               className={cn(
                 "relative outline-none transition-shadow duration-200 focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-white/70",
@@ -691,7 +748,7 @@ export function Pips({
                 boxShadow: armed
                   ? `inset 0 0 0 2px ${ACCENT.solid}cc`
                   : `inset 0 0 0 1.5px ${tint.edge}`,
-                cursor: won && !covered ? "default" : "pointer",
+                cursor: won ? "default" : "pointer",
               }}
             >
               {covered && (
@@ -757,6 +814,29 @@ export function Pips({
         })}
       </div>
 
+      {/* Won-board review affordance: the board is locked, so offer the next
+          actions inline (not only buried in the modal). */}
+      {won && (
+        <div className="mt-4 flex w-full items-center justify-center gap-2.5">
+          <button
+            type="button"
+            onClick={replayPuzzle}
+            className="flex items-center gap-1.5 rounded-pill border border-line-strong px-5 py-2.5 font-display text-[13.5px] text-[#eaf1ff] outline-none transition-colors hover:border-white/30 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40"
+            style={{ background: "rgba(255,255,255,0.04)" }}
+          >
+            <span aria-hidden className="text-[15px] leading-none">↻</span>
+            Play again
+          </button>
+          <Link
+            href="/"
+            className="rounded-pill border border-line-strong px-5 py-2.5 font-display text-[13.5px] text-[#eaf1ff] outline-none transition-colors hover:border-white/30 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40"
+            style={{ background: "rgba(255,255,255,0.04)" }}
+          >
+            Back to today
+          </Link>
+        </div>
+      )}
+
       {/* Selected-domino toolbar */}
       <div className="mt-4 flex min-h-[44px] w-full items-center justify-center">
         {selFaces ? (
@@ -796,7 +876,7 @@ export function Pips({
               type="button"
               onClick={rotate}
               aria-label="Rotate domino orientation"
-              className="flex h-9 min-w-[40px] items-center justify-center rounded-full text-[15px] text-ink-soft outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-white/60"
+              className="flex h-11 min-w-[44px] items-center justify-center rounded-full text-[15px] text-ink-soft outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-white/60"
               style={{ background: "rgba(255,255,255,0.08)" }}
             >
               ↻
@@ -805,7 +885,7 @@ export function Pips({
               type="button"
               onClick={flipPending}
               aria-label="Swap domino faces"
-              className="flex h-9 min-w-[40px] items-center justify-center rounded-full text-[15px] text-ink-soft outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-white/60"
+              className="flex h-11 min-w-[44px] items-center justify-center rounded-full text-[15px] text-ink-soft outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-white/60"
               style={{ background: "rgba(255,255,255,0.08)" }}
             >
               ⇄
@@ -932,6 +1012,32 @@ export function Pips({
         statLabel="SOLVE TIME"
         insight={INSIGHT}
         share={`BrainTap · Pips\nEvery region satisfied 🁫 in ${formatClock(clock.ms)}\n\nbraintap.app`}
+        onReplay={replayPuzzle}
+        replayLabel={result && result.stars < 3 ? "Play again — beat your time" : "Play again"}
+        extra={
+          result && (
+            <div className="space-y-2">
+              <div
+                className="flex items-center justify-center gap-1 text-[26px] leading-none"
+                aria-label={`${result.stars} of 3 stars`}
+              >
+                {Array.from({ length: 3 }, (_, i) => (
+                  <span key={i} style={{ color: i < result.stars ? ACCENT.solid : "rgba(255,255,255,0.18)" }}>
+                    {i < result.stars ? "★" : "☆"}
+                  </span>
+                ))}
+              </div>
+              <p className="font-mono text-[11px] tracking-[0.08em] text-ink-mute">
+                {result.stars < 3
+                  ? `Solve under ${STAR_SECONDS.three}s for ★★★`
+                  : "Fastest tier cleared"}
+                {" · "}
+                {result.moves} {result.moves === 1 ? "move" : "moves"}
+                {result.hints > 0 && ` · ${result.hints} ${result.hints === 1 ? "hint" : "hints"}`}
+              </p>
+            </div>
+          )
+        }
       />
     </div>
   );

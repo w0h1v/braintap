@@ -126,7 +126,7 @@ export function Modal({
       onClick={onClose}
       role="presentation"
     >
-      <div className="flex min-h-full items-center justify-center p-4">
+      <div className="flex min-h-full items-center justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <div
           ref={cardRef}
           role="dialog"

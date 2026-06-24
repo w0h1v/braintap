@@ -59,10 +59,22 @@ const KEY_ROWS = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"];
 const FLIP_MS = 600;
 const FLIP_STAGGER = 90;
 
+// Score penalty applied when the (single-use) hint is revealed, so the hint
+// carries a cost like every other game's hint contract.
+const HINT_PENALTY = 12;
+
+// Distinct corner glyphs per verdict — a non-colour cue so correct/present are
+// distinguishable without relying on hue alone (colour-blind / SR parity).
+const VERDICT_GLYPH: Partial<Record<Verdict, string>> = {
+  correct: "●",
+  present: "◐",
+};
+
 interface BrainleState {
   guesses: string[];
   won: boolean;
   over: boolean;
+  hintUsed?: boolean;
 }
 
 export function Brainle({
@@ -78,13 +90,22 @@ export function Brainle({
   const [won, setWon] = useState(saved?.won ?? false);
   const [over, setOver] = useState(saved?.over ?? false);
   const [message, setMessage] = useState("");
+  // Consolidated per-guess summary for screen readers (e.g. "2 correct, 1 present").
+  const [srSummary, setSrSummary] = useState("");
   const [shake, setShake] = useState(false);
   const [showModal, setShowModal] = useState(false);
   // Index of the row currently playing its flip-reveal (for staggered animation).
   const [revealRow, setRevealRow] = useState<number | null>(null);
+  // How many cells of `revealRow` have crossed the flip mid-point and may now
+  // paint their verdict colour. Cells before this index show their colour; cells
+  // at/after it stay neutral until their own mid-flip timer fires. This makes the
+  // flip an actual reveal rather than a cosmetic spin over an already-coloured tile.
+  const [revealedCells, setRevealedCells] = useState(0);
+  const [hintUsed, setHintUsed] = useState(saved?.hintUsed ?? false);
   const completedRef = useRef(false);
   const msgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const midFlipTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   const answer = puzzle.answer;
   // Guess allowance comes from the puzzle (tier-dependent); the host controls
@@ -108,9 +129,9 @@ export function Brainle({
 
   // Persist resumable state.
   useEffect(() => {
-    onPersistState?.({ guesses, won, over });
+    onPersistState?.({ guesses, won, over, hintUsed });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guesses, won, over]);
+  }, [guesses, won, over, hintUsed]);
 
   // If restoring an already-finished game, surface the modal.
   useEffect(() => {
@@ -126,14 +147,17 @@ export function Brainle({
     () => () => {
       if (msgTimer.current) clearTimeout(msgTimer.current);
       if (revealTimer.current) clearTimeout(revealTimer.current);
+      midFlipTimers.current.forEach(clearTimeout);
     },
     [],
   );
 
-  const flash = useCallback((text: string) => {
+  // `sticky` keeps the message pinned (used to hold the revealed answer in the
+  // message line through the lose beat, until the modal opens).
+  const flash = useCallback((text: string, sticky = false) => {
     setMessage(text);
     if (msgTimer.current) clearTimeout(msgTimer.current);
-    msgTimer.current = setTimeout(() => setMessage(""), 1800);
+    if (!sticky) msgTimer.current = setTimeout(() => setMessage(""), 1800);
   }, []);
 
   const doShake = useCallback(() => {
@@ -160,15 +184,19 @@ export function Brainle({
       // Let the staggered tile reveal (and win bounce) finish before the modal.
       const delay = reducedMotion ? 200 : FLIP_MS + (WORD_LEN - 1) * FLIP_STAGGER + 420;
       setTimeout(() => setShowModal(true), delay);
+      // The hint is a single-use, score-penalised reveal: dock the score on a win
+      // when it was used (clamped to the loss floor so it never goes negative).
+      const base = computeScore(didWin, finalGuesses.length);
+      const score = didWin && hintUsed ? Math.max(20, base - HINT_PENALTY) : base;
       onComplete({
         status: didWin ? "won" : "lost",
-        score: computeScore(didWin, finalGuesses.length),
+        score,
         moves: finalGuesses.length,
         shareText: share,
-        detail: { answer, guesses: finalGuesses.length, won: didWin },
+        detail: { answer, guesses: finalGuesses.length, won: didWin, hintUsed },
       });
     },
-    [answer, onComplete, reducedMotion, maxRows],
+    [answer, onComplete, reducedMotion, maxRows, hintUsed],
   );
 
   const submit = useCallback(() => {
@@ -186,28 +214,61 @@ export function Brainle({
     }
     const nextGuesses = [...guesses, guess];
     const submittedRow = nextGuesses.length - 1;
+    const v = evaluateGuess(guess, answer);
+    const won_ = isWin(v);
+    const anyCorrect = v.some((x) => x === "correct");
+    const nCorrect = v.filter((x) => x === "correct").length;
+    const nPresent = v.filter((x) => x === "present").length;
     setGuesses(nextGuesses);
     setCurrent("");
-    sfx.correct();
-    haptics.success();
+    setSrSummary(
+      won_
+        ? `${guess} — solved!`
+        : `${guess}: ${nCorrect} correct, ${nPresent} present.`,
+    );
 
-    // Drive the staggered flip-reveal for this row (skipped under reduced motion).
-    if (!reducedMotion) {
-      setRevealRow(submittedRow);
-      if (revealTimer.current) clearTimeout(revealTimer.current);
-      revealTimer.current = setTimeout(
-        () => setRevealRow(null),
-        FLIP_MS + (WORD_LEN - 1) * FLIP_STAGGER + 80,
-      );
+    // Feedback for *accepting* the guess. A neutral commit tone for a plain valid
+    // guess; the rewarding correct/success cue is reserved for a win or a row that
+    // landed at least one correct tile — so a wrong guess no longer sounds like a
+    // success.
+    if (won_) {
+      // Win cue is played by finish() (sfx.win / haptics.win); avoid double-firing.
+    } else if (anyCorrect) {
+      sfx.correct();
+      haptics.success();
+    } else {
+      sfx.place();
+      haptics.tap();
     }
 
-    const v = evaluateGuess(guess, answer);
-    if (isWin(v)) {
+    // Drive the staggered flip-reveal for this row (skipped under reduced motion).
+    // Verdict colours stay hidden until each cell crosses the flip mid-point.
+    midFlipTimers.current.forEach(clearTimeout);
+    midFlipTimers.current = [];
+    if (!reducedMotion) {
+      setRevealRow(submittedRow);
+      setRevealedCells(0);
+      for (let c = 0; c < WORD_LEN; c++) {
+        midFlipTimers.current.push(
+          setTimeout(() => setRevealedCells((n) => Math.max(n, c + 1)), c * FLIP_STAGGER + FLIP_MS / 2),
+        );
+      }
+      if (revealTimer.current) clearTimeout(revealTimer.current);
+      revealTimer.current = setTimeout(() => {
+        setRevealRow(null);
+        setRevealedCells(WORD_LEN);
+      }, FLIP_MS + (WORD_LEN - 1) * FLIP_STAGGER + 80);
+    } else {
+      setRevealedCells(WORD_LEN);
+    }
+
+    if (won_) {
       const titles = ["Solved!", "Sharp.", "Locked in.", "Nice synapse."];
       flash(titles[Math.min(nextGuesses.length - 1, titles.length - 1)]);
       finish(true, nextGuesses);
     } else if (nextGuesses.length >= maxRows) {
-      flash(answer);
+      // Pin the revealed answer in the message line through the lose beat.
+      flash(`The word was ${answer}`, true);
       finish(false, nextGuesses);
     }
   }, [over, current, guesses, answer, flash, doShake, finish, reducedMotion, maxRows]);
@@ -227,6 +288,26 @@ export function Brainle({
     if (over) return;
     setCurrent((c) => c.slice(0, -1));
   }, [over]);
+
+  // Replay the same puzzle from scratch (offered from the completion modal).
+  const reset = useCallback(() => {
+    midFlipTimers.current.forEach(clearTimeout);
+    midFlipTimers.current = [];
+    if (msgTimer.current) clearTimeout(msgTimer.current);
+    if (revealTimer.current) clearTimeout(revealTimer.current);
+    completedRef.current = false;
+    setGuesses([]);
+    setCurrent("");
+    setWon(false);
+    setOver(false);
+    setMessage("");
+    setSrSummary("");
+    setShake(false);
+    setShowModal(false);
+    setRevealRow(null);
+    setRevealedCells(0);
+    setHintUsed(false);
+  }, []);
 
   // Physical keyboard.
   useEffect(() => {
@@ -248,9 +329,15 @@ export function Brainle({
   }, [over, submit, backspace, typeLetter]);
 
   const showHint = useCallback(() => {
+    if (hintUsed || over) {
+      // Already spent: re-show the hint without a second penalty.
+      if (hintUsed) flash(`💡 ${puzzle.hint}`);
+      return;
+    }
+    setHintUsed(true);
     flash(`💡 ${puzzle.hint}`);
     haptics.tap();
-  }, [flash, puzzle.hint]);
+  }, [flash, puzzle.hint, hintUsed, over]);
 
   // Per-cell render data for the board (maxRows × WORD_LEN).
   const rows = useMemo(() => {
@@ -301,15 +388,20 @@ export function Brainle({
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff2bd6]/70 focus-visible:ring-offset-1 focus-visible:ring-offset-[#04060f]",
             !over && "active:scale-95",
             over && "opacity-40",
+            hintUsed && "opacity-60",
           )}
           style={{
             background: `${ACCENT.solid}1a`,
             borderColor: `${ACCENT.solid}55`,
             color: ACCENT.soft,
           }}
-          aria-label="Reveal a brain-science hint for today's word"
+          aria-label={
+            hintUsed
+              ? "Hint already used — tap to show it again"
+              : `Reveal a one-time hint (costs ${HINT_PENALTY} points)`
+          }
         >
-          Tap hint
+          {hintUsed ? "Hint used" : `Hint · −${HINT_PENALTY}`}
         </button>
       </div>
 
@@ -326,9 +418,18 @@ export function Brainle({
         {message}
       </div>
 
+      {/* Consolidated per-guess result, announced once per submit (non-visual). */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {srSummary}
+      </p>
+
       {/* board */}
       <div
-        className="mt-2 grid w-full max-w-[min(86vw,320px)] gap-[6px]"
+        className={cn(
+          "mt-2 grid w-full max-w-[min(86vw,320px)] gap-[6px] transition-[filter] duration-500",
+          // Distinct lose cue: desaturate/dim the final board (skipped if reduced motion).
+          over && !won && !reducedMotion && "[filter:grayscale(0.7)_brightness(0.82)]",
+        )}
         style={{ gridTemplateRows: `repeat(${maxRows}, 1fr)` }}
         role="grid"
         aria-label={`Guess board, ${guesses.length} of ${maxRows} guesses used`}
@@ -349,7 +450,11 @@ export function Brainle({
               style={{ gridTemplateColumns: `repeat(${WORD_LEN}, 1fr)` }}
             >
               {cells.map((cell, c) => {
-                const v = cell.verdict;
+                // While this row flips, hold the verdict colour back until the
+                // cell crosses the flip mid-point (tracked by revealedCells). This
+                // makes the flip an actual reveal, not a spin over a coloured tile.
+                const painted = !isRevealing || c < revealedCells;
+                const v = painted ? cell.verdict : null;
                 const bg = v ? VERDICT_BG[v] : "rgba(255,255,255,0.04)";
                 const fg = v ? VERDICT_FG[v] : "#eaf1ff";
                 const border = v
@@ -359,23 +464,24 @@ export function Brainle({
                     : "rgba(255,255,255,0.14)";
                 const glow =
                   v && !reducedMotion && VERDICT_GLOW[v] ? VERDICT_GLOW[v] : undefined;
+                const glyph = v ? VERDICT_GLYPH[v] : undefined;
                 return (
                   <div
                     key={c}
                     role="gridcell"
                     aria-label={
                       cell.letter
-                        ? `${cell.letter}${v ? `, ${v}` : ""}`
+                        ? `${cell.letter}${cell.verdict ? `, ${cell.verdict}` : ""}`
                         : "empty"
                     }
                     className={cn(
-                      "flex aspect-square items-center justify-center rounded-[10px] border-2 font-display font-semibold uppercase",
+                      "relative flex aspect-square items-center justify-center rounded-[10px] border-2 font-display font-semibold uppercase",
                       "text-[clamp(20px,6.6vw,28px)] leading-none",
                       "transition-[transform,background-color,border-color] duration-150",
                       // pop only the live cell as a letter lands
                       cell.live && !v && !reducedMotion && "animate-pop",
                       // staggered flip when a row reveals its verdicts
-                      v && isRevealing && !reducedMotion && "animate-flip",
+                      cell.verdict && isRevealing && !reducedMotion && "animate-flip",
                     )}
                     style={{
                       background: bg,
@@ -383,12 +489,22 @@ export function Brainle({
                       borderColor: border,
                       boxShadow: glow,
                       animationDelay:
-                        v && isRevealing && !reducedMotion
+                        cell.verdict && isRevealing && !reducedMotion
                           ? `${c * FLIP_STAGGER}ms`
                           : undefined,
                     }}
                   >
                     {cell.letter}
+                    {/* Non-colour verdict cue (correct ● / present ◐) for parity
+                        without relying on hue alone. */}
+                    {glyph && (
+                      <span
+                        aria-hidden
+                        className="absolute right-[3px] top-[2px] text-[9px] leading-none opacity-80"
+                      >
+                        {glyph}
+                      </span>
+                    )}
                   </div>
                 );
               })}
@@ -397,10 +513,11 @@ export function Brainle({
         })}
       </div>
 
-      {/* keyboard */}
-      <div className="mt-4 flex w-full max-w-[480px] flex-col items-center gap-[6px] px-0.5">
+      {/* keyboard — tight gaps + minimal padding so the 10-key top row keeps the
+          widest possible per-key target at 360px (KEY-1). */}
+      <div className="mt-4 flex w-full max-w-[480px] flex-col items-center gap-[6px] px-0">
         {KEY_ROWS.map((rowKeys, i) => (
-          <div key={i} className="flex w-full justify-center gap-[5px]">
+          <div key={i} className="flex w-full justify-center gap-[4px]">
             {i === 2 && (
               <KeyButton wide label="Submit guess" onClick={submit} disabled={over}>
                 ENTER
@@ -449,9 +566,19 @@ export function Brainle({
         statLabel={won ? "GUESSES" : answer}
         insight={INSIGHT}
         share={shareString}
+        onReplay={reset}
+        replayLabel="Play again"
         extra={
           emojiGrid ? (
-            <pre className="font-mono text-[18px] leading-[1.2] tracking-[2px]">{emojiGrid}</pre>
+            <div className="flex flex-col items-center gap-2">
+              <pre className="font-mono text-[18px] leading-[1.2] tracking-[2px]">{emojiGrid}</pre>
+              <p className="font-mono text-[10.5px] tracking-[0.12em] text-ink-faint">
+                {won
+                  ? `SOLVED IN ${guesses.length}/${maxRows}`
+                  : `${guesses.length}/${maxRows} USED`}
+                {hintUsed ? ` · HINT (−${HINT_PENALTY})` : ""}
+              </p>
+            </div>
           ) : undefined
         }
       />
@@ -493,7 +620,7 @@ function KeyButton({
       disabled={disabled}
       aria-label={label}
       className={cn(
-        "flex h-[52px] min-w-[30px] items-center justify-center rounded-[8px] font-display font-semibold",
+        "flex h-[52px] min-w-0 items-center justify-center rounded-[8px] px-0 font-display font-semibold",
         "transition-[transform,background-color,color] duration-150 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00e5ff]/70 focus-visible:ring-offset-1 focus-visible:ring-offset-[#04060f]",
         wide ? "flex-[1.4] text-[11px]" : "flex-1 text-[15px]",

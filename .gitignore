@@ -39,6 +39,8 @@ yarn-error.log*
 # playwright QA artifacts
 .playwright-mcp/
 *.png
+*.jpg
+*.jpeg
 
 # playwright runtime outputs
 /test-results/

@@ -78,6 +78,11 @@ export function Strands({
   const [cursor, setCursor] = useState<Cell>([0, 0]);
   const [won, setWon] = useState(saved?.won ?? false);
   const [shake, setShake] = useState(false);
+  /** One-shot board pulse fired on the final word / completion (feel cue). */
+  const [boardWin, setBoardWin] = useState(false);
+  /** Authoritative solve time (ms) captured synchronously at finish; the
+   *  throttled clock state can lag by up to ~250ms. Used for the modal too. */
+  const [finalMs, setFinalMs] = useState<number | null>(saved?.won ? (saved?.elapsedMs ?? 0) : null);
   const [message, setMessage] = useState<string>(DEFAULT_MSG);
   const [msgTone, setMsgTone] = useState<"idle" | "good" | "span" | "bad">("idle");
   /** Word whose cells just popped in (for the reveal animation). */
@@ -86,10 +91,32 @@ export function Strands({
   const msgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completedRef = useRef(saved?.won ?? false);
-  // Guards the rewarded-ad hint flow against re-entrancy while an ad is showing.
-  const adInFlightRef = useRef(false);
+  // Single in-flight guard for the entire hint flow (including the rewarded-ad
+  // await), so a double-tap can't spend two hints or desync the ad path.
+  const hintInFlightRef = useRef(false);
 
   const clock = useGameClock(!won, saved?.elapsedMs ?? 0);
+
+  // Soft hint nudge: after a stretch of inactivity (no new word, no selection)
+  // and with hints still available, gently pulse the Hint button. Resets on
+  // any progress so it only fires when the player seems stuck.
+  const [nudgeHint, setNudgeHint] = useState(false);
+  useEffect(() => {
+    setNudgeHint(false);
+    if (won || hintsUsed >= maxHints || path.length > 0) return;
+    const t = setTimeout(() => setNudgeHint(true), 18000);
+    return () => clearTimeout(t);
+  }, [won, hintsUsed, maxHints, found.length, path.length]);
+
+  // Authoritative elapsed-time accounting, mirroring the clock but readable
+  // synchronously (the clock's `ms` state is throttled to 250ms ticks).
+  const baseElapsedRef = useRef(saved?.elapsedMs ?? 0);
+  const sessionStartRef = useRef(Date.now());
+  /** Elapsed ms at this instant — accurate at the moment of a win. */
+  const elapsedNow = useCallback(
+    () => (won ? baseElapsedRef.current : baseElapsedRef.current + (Date.now() - sessionStartRef.current)),
+    [won],
+  );
 
   /** Stable colour for a given found word. */
   const colorFor = useCallback(
@@ -120,6 +147,15 @@ export function Strands({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [found, won, hintsUsed]);
 
+  // Resume-after-win: if the player returns to an already-solved board, surface
+  // the results modal immediately rather than flashing a frozen, all-disabled
+  // board with no way back to the summary.
+  useEffect(() => {
+    if (saved?.won) setShowModal(true);
+    // Run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Cleanup pending timers on unmount.
   useEffect(
     () => () => {
@@ -144,17 +180,26 @@ export function Strands({
     (allFound: string[]) => {
       if (completedRef.current) return;
       completedRef.current = true;
+      // Capture the authoritative elapsed BEFORE stopping the clock; the
+      // throttled `clock.ms` state may lag the true value by up to ~250ms.
+      const timeMs = elapsedNow();
+      baseElapsedRef.current = timeMs;
+      setFinalMs(timeMs);
       clock.stop();
       setWon(true);
       haptics.win();
       sfx.win();
-      const timeMs = clock.ms;
+      // One-shot board-level completion pulse before the modal opens (feel).
+      if (!reducedMotion) {
+        setBoardWin(true);
+        setTimeout(() => setBoardWin(false), 620);
+      }
       const sec = Math.max(1, Math.round(timeMs / 1000));
       const usedHints = hintsUsedRef.current;
       // Score: fast solves score higher; floor of 50 for completion. Hints cost.
       const base = Math.min(100, 100 - Math.floor(sec / 12));
       const score = Math.max(50, base - usedHints * HINT_PENALTY);
-      setTimeout(() => setShowModal(true), reducedMotion ? 0 : 460);
+      setTimeout(() => setShowModal(true), reducedMotion ? 0 : 620);
       onComplete({
         status: "won",
         score,
@@ -164,7 +209,7 @@ export function Strands({
         detail: { theme: puzzle.theme, hintsUsed: usedHints },
       });
     },
-    [clock, onComplete, puzzle, reducedMotion],
+    [clock, elapsedNow, onComplete, puzzle, reducedMotion],
   );
 
   /** Mark a word's cells with a quick reveal pop (respects reducedMotion). */
@@ -180,36 +225,44 @@ export function Strands({
 
   /** Spend a hint: reveal one not-yet-found word by lighting its path cells. */
   const useHint = useCallback(async () => {
-    if (won || hintsUsed >= maxHints) return;
-    // MON-1: past the free threshold, a non-premium native user earns the hint
-    // by watching a rewarded ad. Inert on web (adsAvailable() is false), so the
-    // hint behaves exactly as before there. Ad fail → no hint, no penalty.
-    if (adsAvailable() && !isPremium && hintsUsed >= getMonetizationConfig().freeHintThreshold) {
-      if (adInFlightRef.current) return; // ignore taps while a rewarded ad is in flight
-      adInFlightRef.current = true;
-      const r = await showRewardedAd();
-      adInFlightRef.current = false;
-      if (r !== "rewarded") return;
+    // Single in-flight guard for the WHOLE hint body: prevents a double-tap
+    // (or a tap during the rewarded-ad await) from spending two hints or
+    // desyncing the rewarded-ad path. Cleared in `finally`.
+    if (hintInFlightRef.current) return;
+    // Read the spend count from the ref, not the closed-over state, so rapid
+    // calls can't both observe the same stale value.
+    const used = hintsUsedRef.current;
+    if (won || used >= maxHints) return;
+    hintInFlightRef.current = true;
+    try {
+      // MON-1: past the free threshold, a non-premium native user earns the hint
+      // by watching a rewarded ad. Inert on web (adsAvailable() is false), so the
+      // hint behaves exactly as before there. Ad fail → no hint, no penalty.
+      if (adsAvailable() && !isPremium && used >= getMonetizationConfig().freeHintThreshold) {
+        const r = await showRewardedAd();
+        if (r !== "rewarded") return;
+      }
+      const hint = getHint(puzzle, found);
+      if (!hint) return;
+      const next = used + 1;
+      hintsUsedRef.current = next;
+      setHintsUsed(next);
+      haptics.tap();
+      sfx.tap();
+      flash(
+        hint.spangram ? `Hint · 🌟 spangram (-${HINT_PENALTY})` : `Hint · ${hint.word.length} letters (-${HINT_PENALTY})`,
+        "idle",
+      );
+      // First hint lights only the first cell; later hints reveal the full path.
+      const cells = next === 1 ? hint.path.slice(0, 1) : hint.path;
+      setHintCells(new Set(cells.map(([r, c]) => cellKey(r, c))));
+      if (hintTimer.current) clearTimeout(hintTimer.current);
+      // Hold the highlight long enough to read, then clear (instant if reduced).
+      hintTimer.current = setTimeout(() => setHintCells(new Set()), reducedMotion ? 1400 : 2200);
+    } finally {
+      hintInFlightRef.current = false;
     }
-    const hint = getHint(puzzle, found);
-    if (!hint) return;
-    const next = hintsUsed + 1;
-    setHintsUsed(next);
-    hintsUsedRef.current = next;
-    haptics.tap();
-    sfx.tap();
-    flash(
-      hint.spangram ? `Hint · 🌟 spangram (-${HINT_PENALTY})` : `Hint · ${hint.word.length} letters (-${HINT_PENALTY})`,
-      "idle",
-    );
-    // First hint lights only the first cell; later hints reveal the full path.
-    const cells =
-      next === 1 ? hint.path.slice(0, 1) : hint.path;
-    setHintCells(new Set(cells.map(([r, c]) => cellKey(r, c))));
-    if (hintTimer.current) clearTimeout(hintTimer.current);
-    // Hold the highlight long enough to read, then clear (instant if reduced).
-    hintTimer.current = setTimeout(() => setHintCells(new Set()), reducedMotion ? 1400 : 2200);
-  }, [won, hintsUsed, maxHints, puzzle, found, flash, reducedMotion, isPremium]);
+  }, [won, maxHints, puzzle, found, flash, reducedMotion, isPremium]);
 
   /** Resolve a completed selection path against the targets. */
   const resolvePath = useCallback(
@@ -238,8 +291,14 @@ export function Strands({
         return;
       }
       const isSpan = match === puzzle.spangram;
-      haptics.success();
-      isSpan ? sfx.win() : sfx.correct();
+      // The spangram is the marquee find: give it a stronger, distinct cue.
+      if (isSpan) {
+        haptics.win();
+        sfx.win();
+      } else {
+        haptics.success();
+        sfx.correct();
+      }
       flash(isSpan ? `🌟 Spangram — ${match}` : `✓ ${match}`, isSpan ? "span" : "good");
       triggerPop(match);
       if (hintCells.size > 0) {
@@ -470,10 +529,17 @@ export function Strands({
   }, [won, move, activate, cursor]);
 
   const validPath = path.length >= 3 && isConnectedPath(path);
+  // The letters spelled by the in-progress selection, for the SR live region.
+  const spelled = useMemo(
+    () => (path.length > 0 ? readPath(puzzle.grid, path) : ""),
+    [path, puzzle.grid],
+  );
   const liveStatus =
-    msgTone === "idle"
-      ? `${found.length} of ${total} found.`
-      : message;
+    msgTone !== "idle"
+      ? message
+      : spelled
+        ? `Spelling: ${spelled.split("").join(" ")}`
+        : `${found.length} of ${total} found.`;
 
   // Connector segments for found words (one polyline per word) + the live path.
   const foundSegments = useMemo(
@@ -505,6 +571,13 @@ export function Strands({
           style={{ color: ACCENT.soft }}
         >
           Theme · {puzzle.theme}
+        </div>
+        {/* Be explicit that the tier difference here is hint generosity — the
+            grid/words are the same — so the choice isn't misleading (MECH). */}
+        <div className="mt-0.5 font-mono text-[9.5px] tracking-[0.08em] text-ink-faint">
+          {maxHints === 0
+            ? "No hints on this tier"
+            : `${maxHints} hint${maxHints === 1 ? "" : "s"} available`}
         </div>
       </div>
 
@@ -549,6 +622,7 @@ export function Strands({
         className={cn(
           "relative",
           shake && !reducedMotion && "animate-shake",
+          boardWin && !reducedMotion && "animate-solve",
         )}
         style={{ width: "var(--strands-w)" }}
       >
@@ -559,21 +633,26 @@ export function Strands({
           preserveAspectRatio="none"
           aria-hidden="true"
         >
-          {foundSegments.map((seg) =>
-            seg.pts.length >= 2 ? (
+          {foundSegments.map((seg) => {
+            if (seg.pts.length < 2) return null;
+            const isSpan = seg.word === puzzle.spangram;
+            return (
               <polyline
                 key={seg.word}
                 points={seg.pts.map((p) => `${p.x},${p.y}`).join(" ")}
                 fill="none"
                 stroke={seg.color}
-                strokeOpacity={0.55}
-                strokeWidth={2.6}
+                // The spangram gets a stronger, more luminous trail to mark it
+                // as the puzzle's marquee thread.
+                strokeOpacity={isSpan ? 0.85 : 0.55}
+                strokeWidth={isSpan ? 3.6 : 2.6}
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 vectorEffect="non-scaling-stroke"
+                style={isSpan ? { filter: `drop-shadow(0 0 4px ${seg.color})` } : undefined}
               />
-            ) : null,
-          )}
+            );
+          })}
           {livePoints.length >= 2 && (
             <polyline
               points={livePoints.map((p) => `${p.x},${p.y}`).join(" ")}
@@ -663,6 +742,18 @@ export function Strands({
                 }}
               >
                 {letter}
+                {/* Non-colour cue: a star marker uniquely flags spangram cells
+                    so they're distinguishable from theme words without relying
+                    on hue alone (a11y). */}
+                {isSpangramCell && (
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute right-0.5 top-0.5 text-[8px] leading-none"
+                    style={{ color: "#04060f" }}
+                  >
+                    ★
+                  </span>
+                )}
               </button>
             );
           })}
@@ -690,6 +781,26 @@ export function Strands({
         className="mt-3 flex items-center justify-center gap-3"
         style={{ width: "var(--strands-w)" }}
       >
+        {won ? (
+          // Solved: the play controls are inert. Offer a clear way back to the
+          // results summary instead of leaving a frozen, all-disabled row.
+          <button
+            type="button"
+            onClick={() => setShowModal(true)}
+            className={cn(
+              "w-full rounded-pill px-7 py-2.5 font-display text-[13.5px] font-semibold text-[#04060f] outline-none transition-transform",
+              !reducedMotion && "active:scale-95",
+              "focus-visible:ring-2 focus-visible:ring-white/80",
+            )}
+            style={{
+              backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`,
+              minHeight: 44,
+            }}
+          >
+            View results
+          </button>
+        ) : (
+        <>
         <button
           type="button"
           onClick={clear}
@@ -705,13 +816,22 @@ export function Strands({
         </button>
         {/* Hard tier offers no hints (maxHints === 0): omit the button entirely. */}
         {maxHints > 0 && (
-          <HintButton
-            used={hintsUsed}
-            max={maxHints}
-            onHint={useHint}
-            accent={ACCENT}
-            disabled={won || remaining <= 0}
-          />
+          <span className="relative inline-flex">
+            {nudgeHint && !reducedMotion && (
+              <span
+                aria-hidden
+                className="pointer-events-none absolute -inset-1 rounded-pill animate-pulse2"
+                style={{ boxShadow: `0 0 0 2px ${ACCENT.solid}55` }}
+              />
+            )}
+            <HintButton
+              used={hintsUsed}
+              max={maxHints}
+              onHint={useHint}
+              accent={ACCENT}
+              disabled={won || remaining <= 0}
+            />
+          </span>
         )}
         <button
           type="button"
@@ -730,6 +850,8 @@ export function Strands({
         >
           Submit
         </button>
+        </>
+        )}
       </div>
 
       <CompletionModal
@@ -737,7 +859,7 @@ export function Strands({
         onClose={() => setShowModal(false)}
         accent={ACCENT}
         title="Every strand found."
-        statValue={formatClock(clock.ms)}
+        statValue={formatClock(finalMs ?? clock.ms)}
         statLabel="SOLVE TIME"
         insight={puzzle.insight}
         extra={
@@ -764,9 +886,12 @@ export function Strands({
                 );
               })}
             </div>
+            <div className="font-mono text-[10.5px] tracking-[0.04em] text-ink-faint">
+              A fresh theme unlocks tomorrow — come back to keep your streak.
+            </div>
           </div>
         }
-        share={`BrainTap · Mind Strands\nTheme: ${puzzle.theme}\n${puzzle.words.length}/${puzzle.words.length} + spangram 🌟\nin ${formatClock(clock.ms)}\n\nbraintap.app`}
+        share={`BrainTap · Mind Strands\nTheme: ${puzzle.theme}\n${puzzle.words.length}/${puzzle.words.length} + spangram 🌟\nin ${formatClock(finalMs ?? clock.ms)}\n\nbraintap.app`}
       />
     </div>
   );

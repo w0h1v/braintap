@@ -115,6 +115,12 @@ export function Reversi({
   const [flipColor, setFlipColor] = useState<Player | null>(null);
   // Transient pass banner (cleared on next move).
   const [passNote, setPassNote] = useState<string | null>(null);
+  // Coaching: one hint per round surfaces the engine's own top-rated move for
+  // you (the cell is highlighted until you move). Resets on new game / tier.
+  const [hint, setHint] = useState<number | null>(null);
+  const [hintUsed, setHintUsed] = useState(false);
+  // Whether the AI is mid-think so the board can visibly lock (dim + no taps).
+  const [aiThinking, setAiThinking] = useState(false);
 
   const completedRef = useRef(saved?.finished ?? false);
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -122,6 +128,9 @@ export function Reversi({
   const prevBoardRef = useRef<Board>(board);
   // Deterministic AI rng — fresh per mount, seeded from the date.
   const aiRng = useRef(rngFromString(`reversi-ai:${dailySeed("reversi", dateISO)}`));
+  // Separate rng for the hint scorer so asking for a hint never perturbs the
+  // AI's deterministic move stream.
+  const hintRng = useRef(rngFromString(`reversi-hint:${dailySeed("reversi", dateISO)}`));
 
   // Timing — the host owns the visible timer, but we still measure solve time so
   // result.timeMs is reported. accumulatedRef holds time from prior sessions;
@@ -264,6 +273,8 @@ export function Reversi({
       if (aiTimer.current) clearTimeout(aiTimer.current);
       const moves = legalMoves(b, AI);
       const delay = reducedMotion ? 60 : moves.length === 0 ? AI_PASS_DELAY : AI_MOVE_DELAY;
+      // Lock the board for the think so taps are visibly ignored, not just no-ops.
+      setAiThinking(true);
       aiTimer.current = setTimeout(() => {
         const m = chooseAiMove(
           b,
@@ -272,6 +283,7 @@ export function Reversi({
           aiRng.current,
           difficultyRef.current,
         );
+        setAiThinking(false);
         if (m < 0) {
           // AI passes back to the human.
           advance(b, YOU);
@@ -305,12 +317,18 @@ export function Reversi({
 
   const playYou = useCallback(
     (i: number) => {
-      if (over || turn !== YOU) return;
+      if (over) return;
+      if (turn !== YOU) {
+        // Soft "not yet" tap so a fast tapper gets feedback while the AI thinks.
+        haptics.tap();
+        return;
+      }
       if (!youMoveSet.has(i)) {
         haptics.error();
         sfx.wrong();
         return;
       }
+      setHint(null);
       const next = applyMove(board, rowOf(i), colOf(i), YOU);
       sfx.place();
       haptics.success();
@@ -321,10 +339,27 @@ export function Reversi({
     [over, turn, youMoveSet, board, advance, commitBoard],
   );
 
+  // One coaching hint per round: surface the engine's own top-rated move for you
+  // (uses the AI scorer on your discs). Component-level — no engine change.
+  const showHint = useCallback(() => {
+    if (over || turn !== YOU || hintUsed || youMoves.length === 0) return;
+    const best = chooseAiMove(board, YOU, puzzle.aggressiveness, hintRng.current, "hard");
+    if (best < 0) return;
+    setHint(best);
+    setHintUsed(true);
+    setFocused(best);
+    haptics.tap();
+  }, [over, turn, hintUsed, youMoves.length, board, puzzle.aggressiveness]);
+
   const reset = useCallback(() => {
+    // Only a replay AFTER finishing is "practice" (won't re-record today). A
+    // "New game" tapped mid-round must start a fresh, still-recordable round —
+    // otherwise the real win can never register (completedRef gates finish()).
+    const wasDone = completedRef.current;
     if (aiTimer.current) clearTimeout(aiTimer.current);
     if (flipTimer.current) clearTimeout(flipTimer.current);
     aiRng.current = rngFromString(`reversi-ai:${dailySeed("reversi", dateISO)}`);
+    hintRng.current = rngFromString(`reversi-hint:${dailySeed("reversi", dateISO)}`);
     const fresh = initialBoard();
     prevBoardRef.current = fresh;
     accumulatedRef.current = 0;
@@ -337,8 +372,11 @@ export function Reversi({
     setFlipping(new Set());
     setFlipColor(null);
     setPassNote(null);
-    setPractice(true); // already completed today; replay is practice
-    completedRef.current = true;
+    setHint(null);
+    setHintUsed(false);
+    setAiThinking(false);
+    setPractice(wasDone); // replay-after-finish is practice; mid-round restart is not
+    completedRef.current = wasDone;
     setTurn(puzzle.firstTurn);
     if (puzzle.firstTurn === AI) scheduleAi(fresh);
   }, [dateISO, puzzle.firstTurn, scheduleAi]);
@@ -366,6 +404,10 @@ export function Reversi({
     setFlipping(new Set());
     setFlipColor(null);
     setPassNote(null);
+    setHint(null);
+    setHintUsed(false);
+    setAiThinking(false);
+    hintRng.current = rngFromString(`reversi-hint:${dailySeed("reversi", dateISO)}`);
     setPractice(false);
     setTurn(puzzle.firstTurn);
     if (puzzle.firstTurn === AI) scheduleAi(fresh);
@@ -377,6 +419,10 @@ export function Reversi({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "r" || e.key === "R") {
         reset();
+        return;
+      }
+      if (e.key === "h" || e.key === "H") {
+        showHint();
         return;
       }
       if (over || turn !== YOU) return;
@@ -396,7 +442,7 @@ export function Reversi({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [over, turn, focused, playYou, reset]);
+  }, [over, turn, focused, playYou, reset, showHint]);
 
   const turnLabel = over ? "—" : turn === YOU ? "You" : "BrainTap";
   const msg = over
@@ -417,7 +463,10 @@ export function Reversi({
       }`
     : `${msg}. You ${counts.you}, BrainTap ${counts.ai}.`;
 
-  const BOARD_MAX = "min(92vw, 380px)";
+  // Floor the board near full-width on narrow phones so each of the 8 cells
+  // clears the 44px tap target: 96vw at 360px ≈ 41px cells with the button as
+  // the hit area, vs 92vw which dropped cells under the minimum.
+  const BOARD_MAX = "min(96vw, 380px)";
 
   return (
     <div
@@ -491,7 +540,12 @@ export function Reversi({
       <div
         role="grid"
         aria-label="Reversi board, 8 by 8"
-        className="grid aspect-square w-full grid-cols-8 rounded-2xl border p-1"
+        className={cn(
+          "grid aspect-square w-full grid-cols-8 rounded-2xl border p-1",
+          !reducedMotion && "transition-opacity duration-200",
+          // Visibly lock the board while the AI thinks so taps read as ignored.
+          aiThinking && "pointer-events-none opacity-60",
+        )}
         style={{
           maxWidth: BOARD_MAX,
           gap: "clamp(2px, 0.7vw, 3px)",
@@ -508,10 +562,19 @@ export function Reversi({
           const isLast = last === i;
           const isFocus = focused === i;
           const isFlipping = flipping.has(i);
+          const isHint = hint === i;
           const isCorner =
             (r === 0 || r === SIZE - 1) && (c === 0 || c === SIZE - 1);
           const ariaState =
-            v === YOU ? "your disc" : v === AI ? "AI disc" : legal ? "empty, legal move" : "empty";
+            v === YOU
+              ? "your disc"
+              : v === AI
+                ? "AI disc"
+                : isHint
+                  ? "empty, suggested move"
+                  : legal
+                    ? "empty, legal move"
+                    : "empty";
           return (
             <button
               key={i}
@@ -528,42 +591,72 @@ export function Reversi({
                 !reducedMotion && "transition-colors duration-150",
               )}
               style={{
-                background: isCorner ? `${ACCENT.solid}12` : "rgba(6,20,16,.5)",
-                boxShadow: isFocus
-                  ? `0 0 0 2px ${ACCENT.solid}, 0 0 12px ${ACCENT.solid}66`
+                background: isHint
+                  ? `${ACCENT.solid}26`
                   : isCorner
-                    ? `inset 0 0 0 1px ${ACCENT.solid}30`
-                    : undefined,
+                    ? `${ACCENT.solid}12`
+                    : "rgba(6,20,16,.5)",
+                boxShadow: isHint
+                  ? `0 0 0 2px ${ACCENT.solid}, 0 0 16px ${ACCENT.solid}99`
+                  : isFocus
+                    ? `0 0 0 2px ${ACCENT.solid}, 0 0 12px ${ACCENT.solid}66`
+                    : isCorner
+                      ? `inset 0 0 0 1px ${ACCENT.solid}30`
+                      : undefined,
               }}
             >
-              {v !== EMPTY && (
-                <span
-                  className={cn(
-                    "block rounded-full",
-                    !reducedMotion && "transition-transform duration-200",
-                  )}
-                  style={{
-                    width: "78%",
-                    height: "78%",
-                    ...discStyle(
-                      isFlipping && flipColor ? flipColor : (v as Player),
-                    ),
-                    transformStyle: "preserve-3d",
-                    animation:
-                      isFlipping && !reducedMotion
-                        ? `btFlip ${FLIP_MS}ms ease both`
-                        : !reducedMotion && isLast
-                          ? "btPop 0.34s cubic-bezier(.2,.7,.2,1) both"
-                          : undefined,
-                    ...(isLast
-                      ? {
-                          outline: `2px solid ${flipColor === AI || v === AI ? AI_SOFT : YOU_SOFT}`,
-                          outlineOffset: "-2px",
+              {v !== EMPTY &&
+                (() => {
+                  // Owner shown by colour AND shape so it's legible without
+                  // colour: your discs carry a solid centre dot, the AI's a
+                  // hollow ring. Track the flip colour mid-animation too.
+                  const shownOwner: Player =
+                    isFlipping && flipColor ? flipColor : (v as Player);
+                  return (
+                    <span
+                      className={cn(
+                        "flex items-center justify-center rounded-full",
+                        !reducedMotion && "transition-transform duration-200",
+                      )}
+                      style={{
+                        width: "78%",
+                        height: "78%",
+                        ...discStyle(shownOwner),
+                        transformStyle: "preserve-3d",
+                        animation:
+                          isFlipping && !reducedMotion
+                            ? `btFlip ${FLIP_MS}ms ease both`
+                            : !reducedMotion && isLast
+                              ? "btPop 0.34s cubic-bezier(.2,.7,.2,1) both"
+                              : undefined,
+                        ...(isLast
+                          ? {
+                              outline: `2px solid ${shownOwner === AI ? AI_SOFT : YOU_SOFT}`,
+                              outlineOffset: "-2px",
+                            }
+                          : {}),
+                      }}
+                    >
+                      <span
+                        aria-hidden
+                        className="block rounded-full"
+                        style={
+                          shownOwner === YOU
+                            ? {
+                                width: "30%",
+                                height: "30%",
+                                background: "rgba(4,16,24,.55)",
+                              }
+                            : {
+                                width: "42%",
+                                height: "42%",
+                                border: "2px solid rgba(20,4,16,.55)",
+                              }
                         }
-                      : {}),
-                  }}
-                />
-              )}
+                      />
+                    </span>
+                  );
+                })()}
               {v === EMPTY && legal && (
                 <span
                   className={cn(
@@ -583,21 +676,59 @@ export function Reversi({
         })}
       </div>
 
-      {/* New game */}
-      <button
-        type="button"
-        onClick={reset}
-        className={cn(
-          "mt-[18px] min-h-[44px] rounded-pill border px-6 py-2.5 font-display text-[13.5px] text-[#eaf1ff] outline-none",
-          !reducedMotion && "transition-transform active:scale-95",
+      {/* Actions */}
+      <div className="mt-[18px] flex flex-wrap items-center justify-center gap-2.5">
+        {over ? (
+          <button
+            type="button"
+            onClick={() => setShowModal(true)}
+            className={cn(
+              "min-h-[44px] rounded-pill border px-6 py-2.5 font-display text-[13.5px] outline-none",
+              !reducedMotion && "transition-transform active:scale-95",
+            )}
+            style={{
+              borderColor: `${ACCENT.solid}66`,
+              background: `${ACCENT.solid}1f`,
+              color: ACCENT.soft,
+            }}
+          >
+            View result
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={showHint}
+            disabled={hintUsed || turn !== YOU || youMoves.length === 0}
+            aria-label={hintUsed ? "Hint used" : "Show a suggested move"}
+            className={cn(
+              "min-h-[44px] rounded-pill border px-5 py-2.5 font-display text-[13.5px] outline-none disabled:opacity-40",
+              !reducedMotion && "transition-transform active:scale-95",
+            )}
+            style={{
+              borderColor: `${ACCENT.solid}55`,
+              background: `${ACCENT.solid}14`,
+              color: ACCENT.soft,
+            }}
+          >
+            {hintUsed ? "Hint used" : "💡 Hint"}
+          </button>
         )}
-        style={{
-          borderColor: "rgba(255,255,255,.2)",
-          background: "rgba(255,255,255,.04)",
-        }}
-      >
-        New game
-      </button>
+
+        <button
+          type="button"
+          onClick={reset}
+          className={cn(
+            "min-h-[44px] rounded-pill border px-6 py-2.5 font-display text-[13.5px] text-[#eaf1ff] outline-none",
+            !reducedMotion && "transition-transform active:scale-95",
+          )}
+          style={{
+            borderColor: "rgba(255,255,255,.2)",
+            background: "rgba(255,255,255,.04)",
+          }}
+        >
+          New game
+        </button>
+      </div>
 
       {practice && !over && (
         <p className="mt-2 font-mono text-[10.5px] tracking-[0.12em] text-ink-faint">
@@ -614,6 +745,8 @@ export function Reversi({
         title={modalTitle}
         insight={INSIGHT}
         share={modalShare}
+        onReplay={reset}
+        replayLabel="New game"
         extra={
           <div className="flex items-center justify-center gap-7">
             <div className="flex flex-col items-center">
@@ -682,10 +815,19 @@ function ScoreCard({
       }}
     >
       <span
-        className="block h-4 w-4 shrink-0 rounded-full"
+        className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
         style={discStyle(disc)}
         aria-hidden
-      />
+      >
+        <span
+          className="block rounded-full"
+          style={
+            disc === YOU
+              ? { width: "30%", height: "30%", background: "rgba(4,16,24,.55)" }
+              : { width: "42%", height: "42%", border: "1.5px solid rgba(20,4,16,.55)" }
+          }
+        />
+      </span>
       <div className="flex min-w-0 flex-col leading-none">
         <span
           className="font-display text-[22px] font-semibold tabular-nums"

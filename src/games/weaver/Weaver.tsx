@@ -48,6 +48,13 @@ interface WeaverState {
   hintsUsed?: number;
 }
 
+/**
+ * Idea Weaver is intentionally WIN-ONLY: there is no lose / fail / timeout
+ * state. The puzzle is always solvable, in-progress state is persisted via
+ * onPersistState, and players resume exactly where they left off — so the
+ * CompletionModal only ever represents a win. The missing "fail UI" is by
+ * design, not a bug. (QA note for the win-lose audit dimension.)
+ */
 export function Weaver({
   puzzle,
   onComplete,
@@ -114,6 +121,10 @@ export function Weaver({
   const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const spinTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shakeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guards submit() against a double-fire (rapid Enter taps / key-repeat) while
+  // the winning word is being committed and the pre-modal delay is in flight, so
+  // the goal-reaching word can never be counted twice.
+  const submittingRef = useRef(false);
   // Seed the once-only completion guard from the resumed state so a finished
   // tier never re-fires onComplete when the player keeps finding words on reload.
   const completedRef = useRef(saved?.won ?? false);
@@ -160,6 +171,9 @@ export function Weaver({
   const pct =
     goal > 0 ? Math.min(100, Math.round((found.length / goal) * 100)) : 0;
   const goalMet = found.length >= goal;
+  // A 100% clear (every valid word found) is celebrated distinctly from just
+  // meeting the tier's win goal — the marquee "why come back" achievement.
+  const fullClear = total > 0 && found.length >= total;
   const pangramCount = useMemo(
     () => found.filter((w) => isPangram(w, hive)).length,
     [found, hive],
@@ -231,6 +245,14 @@ export function Weaver({
 
   const submit = useCallback(() => {
     if (!cur) return;
+    // Re-entrancy guard: React batches setCur("")/setFound(), so a second Enter
+    // fired before the next render still sees the same stale `cur`/`foundSet` and
+    // could re-evaluate (and re-count) the same word. Released on the next tick.
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    queueMicrotask(() => {
+      submittingRef.current = false;
+    });
     const r = evaluateWord(cur, puzzle, foundSet);
     if (!r.ok) {
       showFlash(ERROR_TEXT[r.reason], "err");
@@ -409,7 +431,9 @@ export function Weaver({
           </div>
           {goalMet ? (
             <div className="mt-1 truncate font-mono text-[10px]" style={{ color: ACCENT.soft }}>
-              Goal cleared — keep finding words!
+              {fullClear
+                ? "🏆 Perfect clear — every word found!"
+                : `Goal cleared — ${total - found.length} word${total - found.length === 1 ? "" : "s"} left for a perfect clear`}
             </div>
           ) : (
             <div className="mt-1 truncate font-mono text-[10px] text-ink-faint">
@@ -462,14 +486,24 @@ export function Weaver({
         <span role="status" aria-live="polite" className="break-all text-center">
           {cur ? (
             <span className="font-display text-[26px] font-semibold tracking-[0.08em]">
-              {cur.split("").map((ch, i) => (
-                <span
-                  key={i}
-                  style={{ color: ch === puzzle.center ? ACCENT.solid : "#f3f7ff" }}
-                >
-                  {ch}
-                </span>
-              ))}
+              {cur.split("").map((ch, i) => {
+                const isCenter = ch === puzzle.center;
+                return (
+                  <span
+                    key={i}
+                    // Non-colour cue (a11y): the required centre letter is also
+                    // underlined, not distinguished by accent colour alone.
+                    style={{
+                      color: isCenter ? ACCENT.solid : "#f3f7ff",
+                      textDecoration: isCenter ? "underline" : undefined,
+                      textUnderlineOffset: isCenter ? "4px" : undefined,
+                      textDecorationThickness: isCenter ? "2px" : undefined,
+                    }}
+                  >
+                    {ch}
+                  </span>
+                );
+              })}
               {!reducedMotion && (
                 <span
                   aria-hidden
@@ -477,6 +511,14 @@ export function Weaver({
                   style={{ height: "1.1em", background: ACCENT.soft, opacity: 0.7 }}
                 />
               )}
+              {/* Backspace affordance: signals the strip itself deletes the last
+                  letter (it only ever backspaces, never clears the whole word). */}
+              <span
+                aria-hidden
+                className="ml-2 align-middle font-mono text-[13px] text-ink-faint"
+              >
+                ⌫
+              </span>
             </span>
           ) : (
             <span className="font-mono text-[12px] text-ink-faint">
@@ -518,14 +560,15 @@ export function Weaver({
         />
       </div>
 
-      {/* Action buttons */}
-      <div className="mt-5 flex w-full items-center justify-center gap-3">
+      {/* Action buttons — flex-nowrap with breakpoint-scaled gap/padding so the
+          Delete / Shuffle / Enter row never wraps or clips on a ~320px phone. */}
+      <div className="mt-5 flex w-full flex-nowrap items-center justify-center gap-2 sm:gap-3">
         <button
           type="button"
           onClick={del}
           disabled={!cur}
           className={cn(
-            "min-h-[44px] rounded-pill border border-line-strong px-5 font-display text-[14px] text-[#eaf1ff]",
+            "min-h-[44px] rounded-pill border border-line-strong px-4 font-display text-[14px] text-[#eaf1ff] sm:px-5",
             "outline-none transition-transform focus-visible:ring-2 focus-visible:ring-white/30 active:scale-95 disabled:opacity-40",
           )}
           style={{ background: "rgba(255,255,255,0.04)" }}
@@ -558,7 +601,7 @@ export function Weaver({
           onClick={submit}
           disabled={cur.length < 4}
           className={cn(
-            "min-h-[44px] rounded-pill px-7 font-display text-[14px] font-semibold text-[#04060f]",
+            "min-h-[44px] rounded-pill px-6 font-display text-[14px] font-semibold text-[#04060f] sm:px-7",
             "outline-none transition-transform focus-visible:ring-2 focus-visible:ring-white/50 active:scale-95",
             "disabled:opacity-40",
           )}
@@ -633,21 +676,37 @@ export function Weaver({
         open={showModal}
         onClose={() => setShowModal(false)}
         accent={ACCENT}
-        title="Goal reached."
+        title={fullClear ? "Perfect clear!" : "Goal reached."}
         statValue={rank}
         statLabel={`${found.length} WORDS · ${score} POINTS`}
         insight={INSIGHT}
         extra={
-          pangramCount > 0 ? (
-            <div
-              className="mt-4 inline-flex items-center gap-2 rounded-pill px-3 py-1.5 font-mono text-[11px]"
-              style={{
-                color: ACCENT.soft,
-                background: "rgba(255,255,255,0.05)",
-                border: `1px solid ${ACCENT.solid}44`,
-              }}
-            >
-              ✨ {pangramCount} pangram{pangramCount > 1 ? "s" : ""} found
+          fullClear || pangramCount > 0 ? (
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              {fullClear && (
+                <div
+                  className="inline-flex items-center gap-2 rounded-pill px-3 py-1.5 font-mono text-[11px] font-semibold"
+                  style={{
+                    color: "#04060f",
+                    backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`,
+                    boxShadow: `0 0 14px ${ACCENT.solid}55`,
+                  }}
+                >
+                  🏆 Found all {total} words
+                </div>
+              )}
+              {pangramCount > 0 && (
+                <div
+                  className="inline-flex items-center gap-2 rounded-pill px-3 py-1.5 font-mono text-[11px]"
+                  style={{
+                    color: ACCENT.soft,
+                    background: "rgba(255,255,255,0.05)",
+                    border: `1px solid ${ACCENT.solid}44`,
+                  }}
+                >
+                  ✨ {pangramCount} pangram{pangramCount > 1 ? "s" : ""} found
+                </div>
+              )}
             </div>
           ) : undefined
         }

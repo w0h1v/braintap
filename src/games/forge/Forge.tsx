@@ -53,6 +53,26 @@ function lineSatisfied(values: Cell[], clue: Clue): boolean {
   return true;
 }
 
+/** Total filled cells a clue requires (0 for an empty `[0]` line). */
+function clueTotal(clue: Clue): number {
+  return clue.length === 1 && clue[0] === 0 ? 0 : clue.reduce((a, b) => a + b, 0);
+}
+
+/**
+ * True when the filled cells in a line can no longer satisfy its clue — i.e.
+ * the player has filled more cells than the clue allows, or formed a run that
+ * is strictly longer than the clue's largest run. Used to flag a mis-fill.
+ */
+function lineBroken(values: Cell[], clue: Clue): boolean {
+  const binary = values.map((v) => (v === 1 ? 1 : 0));
+  const filled = binary.reduce<number>((a, b) => a + b, 0);
+  if (filled > clueTotal(clue)) return true;
+  // Any contiguous run longer than the clue's longest run is unsatisfiable.
+  const runs = lineClue(binary).filter((n) => n > 0);
+  const maxAllowed = Math.max(0, ...clue);
+  return runs.some((run) => run > maxAllowed);
+}
+
 export function Forge({
   puzzle,
   onComplete,
@@ -76,6 +96,12 @@ export function Forge({
   const [hintsUsed, setHintsUsed] = useState(saved?.hintsUsed ?? 0);
   const [selected, setSelected] = useState<number>(0);
   const [markMode, setMarkMode] = useState(false);
+  // Undo stack of prior board snapshots (most recent last). Reset on new game.
+  const [history, setHistory] = useState<Cell[][]>([]);
+  // Set briefly when a fill breaks a row/column clue; drives a red shake cue.
+  const [errorCell, setErrorCell] = useState<number | null>(null);
+  // Asks for confirmation before clearing a non-empty board.
+  const [confirmClear, setConfirmClear] = useState(false);
   // Cell index revealed by the most recent hint (drives a one-shot pulse).
   const [hintCell, setHintCell] = useState<number | null>(null);
   // Cells that played the solve "ripple"; drives a one-shot per-cell animation.
@@ -89,10 +115,22 @@ export function Forge({
   const hintsRef = useRef(saved?.hintsUsed ?? 0);
   const gridRef = useRef<HTMLDivElement>(null);
   const longPress = useRef<{ id: number; timer: number } | null>(null);
+  // True for the click that immediately follows a fired long-press, so we can
+  // swallow the synthetic trailing onClick and not toggle the cell twice.
+  const longPressFired = useRef(false);
+  const errorTimer = useRef<number | null>(null);
   // Guards the rewarded-ad hint flow against re-entrancy while an ad is showing.
   const adInFlightRef = useRef(false);
 
   const clock = useGameClock(!won && started, saved?.elapsedMs ?? 0);
+
+  // Clear any pending error-flash timer on unmount.
+  useEffect(
+    () => () => {
+      if (errorTimer.current) window.clearTimeout(errorTimer.current);
+    },
+    [],
+  );
 
   // Begin play: reveal the board and start the timer.
   const begin = useCallback(() => {
@@ -155,6 +193,38 @@ export function Forge({
     [finish, puzzle.solution],
   );
 
+  // Flash the error cue on a cell whose fill broke a clue.
+  const flagError = useCallback(
+    (i: number) => {
+      sfx.wrong();
+      haptics.error();
+      if (reducedMotion) return;
+      if (errorTimer.current) window.clearTimeout(errorTimer.current);
+      setErrorCell(i);
+      errorTimer.current = window.setTimeout(() => setErrorCell(null), 450);
+    },
+    [reducedMotion],
+  );
+
+  // True if filling cell `i` makes its row OR column clue unsatisfiable.
+  const fillBreaksClue = useCallback(
+    (next: Cell[], i: number) => {
+      const r = Math.floor(i / N);
+      const c = i % N;
+      const row = Array.from({ length: N }, (_, cc) => next[cellIndex(r, cc, N)]);
+      const col = Array.from({ length: N }, (_, rr) => next[cellIndex(rr, c, N)]);
+      return (
+        lineBroken(row, puzzle.rowClues[r]) || lineBroken(col, puzzle.colClues[c])
+      );
+    },
+    [N, puzzle.rowClues, puzzle.colClues],
+  );
+
+  // Snapshot the current board onto the undo stack before a mutating action.
+  const pushHistory = useCallback((prev: Cell[]) => {
+    setHistory((h) => [...h.slice(-49), prev.slice() as Cell[]]);
+  }, []);
+
   // Toggle fill (left-click / primary). Filled <-> empty.
   const toggleFill = useCallback(
     (i: number) => {
@@ -162,9 +232,16 @@ export function Forge({
       setCells((prev) => {
         const next = prev.slice() as Cell[];
         next[i] = next[i] === 1 ? 0 : 1;
+        pushHistory(prev);
         if (next[i] === 1) {
-          sfx.place();
-          haptics.success();
+          // A fill that breaks a clue is a mistake: reserve the celebratory
+          // place/success cue for plausibly-correct fills only.
+          if (fillBreaksClue(next, i)) {
+            flagError(i);
+          } else {
+            sfx.place();
+            haptics.success();
+          }
         } else {
           sfx.tap();
           haptics.tap();
@@ -173,7 +250,7 @@ export function Forge({
         return next;
       });
     },
-    [won, checkSolved],
+    [won, checkSolved, pushHistory, fillBreaksClue, flagError],
   );
 
   // Toggle mark-empty (right-click / mark mode / long-press). Empty <-> marked.
@@ -185,13 +262,52 @@ export function Forge({
         // Never clobber a filled cell with a mark.
         if (next[i] === 1) return prev;
         next[i] = next[i] === 2 ? 0 : 2;
+        pushHistory(prev);
         sfx.tap();
         haptics.tap();
         return next;
       });
     },
-    [won],
+    [won, pushHistory],
   );
+
+  // Undo the most recent board-mutating action.
+  const undo = useCallback(() => {
+    if (won) return;
+    setHistory((h) => {
+      if (h.length === 0) return h;
+      const prev = h[h.length - 1];
+      setCells(prev.slice() as Cell[]);
+      sfx.tap();
+      haptics.tap();
+      return h.slice(0, -1);
+    });
+  }, [won]);
+
+  // Clear the whole board back to empty (after confirming a non-empty board).
+  const clearBoard = useCallback(() => {
+    if (won) return;
+    setCells((prev) => {
+      if (prev.every((v) => v === 0)) return prev;
+      pushHistory(prev);
+      return new Array(CELLS).fill(0) as Cell[];
+    });
+    setConfirmClear(false);
+    sfx.tap();
+    haptics.tap();
+  }, [won, CELLS, pushHistory]);
+
+  const onClearClick = useCallback(() => {
+    if (won) return;
+    // Confirm only when there is something to lose.
+    if (cells.every((v) => v === 0)) return;
+    if (confirmClear) clearBoard();
+    else {
+      setConfirmClear(true);
+      haptics.tap();
+      window.setTimeout(() => setConfirmClear(false), 3000);
+    }
+  }, [won, cells, confirmClear, clearBoard]);
 
   // Reveal one correct cell from the solution (fill it, or mark an empty one).
   const useHint = useCallback(async () => {
@@ -228,6 +344,11 @@ export function Forge({
   // Primary cell action depends on current mode.
   const onCellActivate = useCallback(
     (i: number) => {
+      // Swallow the synthetic click that fires right after a long-press mark.
+      if (longPressFired.current) {
+        longPressFired.current = false;
+        return;
+      }
       setSelected(i);
       if (markMode) toggleMark(i);
       else toggleFill(i);
@@ -248,8 +369,16 @@ export function Forge({
   const onTouchStart = useCallback(
     (i: number) => {
       if (won) return;
+      // Clear any stale flag from a prior long-press whose trailing synthetic
+      // click was suppressed by the browser — otherwise it would swallow this
+      // touch's genuine tap.
+      longPressFired.current = false;
       const timer = window.setTimeout(() => {
         longPress.current = null;
+        // Arm: confirm the long-press fired with a tap pulse, and flag it so the
+        // trailing synthetic click is ignored (no double-toggle).
+        longPressFired.current = true;
+        haptics.tap();
         setSelected(i);
         toggleMark(i);
       }, 380);
@@ -316,17 +445,26 @@ export function Forge({
         case "Delete":
         case "0":
           setCells((prev) => {
+            if (prev[selected] === 0) return prev;
+            pushHistory(prev);
             const next = prev.slice() as Cell[];
             next[selected] = 0;
             return next;
           });
           e.preventDefault();
           break;
+        case "u":
+        case "U":
+        case "z":
+        case "Z":
+          undo();
+          e.preventDefault();
+          break;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [won, started, markMode, selected, move, toggleFill, toggleMark, begin]);
+  }, [won, started, markMode, selected, move, toggleFill, toggleMark, begin, undo, pushHistory]);
 
   // Per-line completion (for clue dimming) + overall progress.
   const { rowDone, colDone, progress } = useMemo(() => {
@@ -360,9 +498,21 @@ export function Forge({
     };
   }, [cells, N, puzzle.rowClues, puzzle.colClues, puzzle.solution]);
 
-  const status = won
-    ? `Solved! ${puzzle.glyphName} revealed.`
-    : `${progress}% of the glyph revealed`;
+  // Announce progress to assistive tech, but only at 25% milestones so the
+  // live region isn't read out on every single fill.
+  const lastAnnounced = useRef<number>(-1);
+  const [liveMsg, setLiveMsg] = useState("");
+  useEffect(() => {
+    if (won) {
+      setLiveMsg(`Solved! ${puzzle.glyphName} revealed.`);
+      return;
+    }
+    const bucket = Math.floor(progress / 25);
+    if (bucket !== lastAnnounced.current) {
+      lastAnnounced.current = bucket;
+      setLiveMsg(`${progress}% of the glyph revealed`);
+    }
+  }, [progress, won, puzzle.glyphName]);
 
   return (
     <div className="flex w-full flex-col items-center">
@@ -384,12 +534,15 @@ export function Forge({
           "mb-2 h-[20px] font-display text-[15px] font-semibold transition-opacity duration-200",
           won ? "opacity-100" : "opacity-0",
         )}
-        aria-live="polite"
         style={{ color: ACCENT.soft }}
       >
-        <span className="sr-only">{status}</span>
         <span aria-hidden>{won ? "Glyph revealed!" : ""}</span>
       </div>
+
+      {/* progress + win announcements for assistive tech (throttled to 25%) */}
+      <span aria-live="polite" className="sr-only">
+        {liveMsg}
+      </span>
 
       {/* board wrapper (for solved vignette + instructions overlay) */}
       <div className="relative w-full" style={{ maxWidth: 420 }}>
@@ -398,8 +551,10 @@ export function Forge({
           className={cn("mx-auto select-none rounded-2xl p-2 transition-shadow")}
           style={{
             display: "grid",
-            gridTemplateColumns: `clamp(30px, 12vw, 50px) repeat(${N}, minmax(0, 1fr))`,
-            gap: "clamp(3px, 1vw, 5px)",
+            // Shrink the clue gutter on the dense 7×7 grid so all cells fit at
+            // narrow widths (≤360px) without overflowing the wrapper.
+            gridTemplateColumns: `${N >= 7 ? "clamp(24px, 9vw, 42px)" : "clamp(30px, 12vw, 50px)"} repeat(${N}, minmax(0, 1fr))`,
+            gap: N >= 7 ? "clamp(2px, 0.8vw, 4px)" : "clamp(3px, 1vw, 5px)",
             // Fill the w-full / maxWidth:420 wrapper above. Using 92vw here made
             // the grid wider than that wrapper, and `mx-auto` then collapsed to 0
             // and let it overflow the viewport on phones (≤ ~800px wide).
@@ -458,6 +613,7 @@ export function Forge({
               rowDone={rowDone[r]}
               solveBurst={solveBurst}
               hintCell={hintCell}
+              errorCell={errorCell}
               reducedMotion={Boolean(reducedMotion)}
               onActivate={onCellActivate}
               onContext={onCellContext}
@@ -523,14 +679,14 @@ export function Forge({
       </div>
 
       {/* controls */}
-      <div className="mt-4 flex w-full max-w-[420px] items-center justify-center gap-3">
+      <div className="mt-4 flex w-full max-w-[420px] flex-wrap items-center justify-center gap-2.5">
         <button
           type="button"
           onClick={() => setMarkMode((m) => !m)}
           aria-pressed={markMode}
           disabled={won}
           className={cn(
-            "min-h-[44px] rounded-pill border px-6 py-2.5 font-display text-[13.5px] transition-all active:scale-95 disabled:opacity-40",
+            "min-h-[44px] rounded-pill border px-5 py-2.5 font-display text-[13.5px] transition-all active:scale-95 disabled:opacity-40",
             markMode ? "text-[#04060f]" : "border-line-strong text-[#eaf1ff]",
           )}
           style={
@@ -545,6 +701,35 @@ export function Forge({
         >
           ✕ Mark · {markMode ? "On" : "Off"}
         </button>
+        <button
+          type="button"
+          onClick={undo}
+          disabled={won || history.length === 0}
+          aria-label="Undo last move"
+          className="min-h-[44px] min-w-[44px] rounded-pill border border-line-strong px-4 py-2.5 font-display text-[13.5px] text-[#eaf1ff] transition-all active:scale-95 disabled:opacity-30"
+          style={{ background: "rgba(255,255,255,0.04)" }}
+        >
+          ↺ Undo
+        </button>
+        <button
+          type="button"
+          onClick={onClearClick}
+          disabled={won || cells.every((v) => v === 0)}
+          aria-label={confirmClear ? "Confirm clear board" : "Clear board"}
+          className={cn(
+            "min-h-[44px] min-w-[44px] rounded-pill border px-4 py-2.5 font-display text-[13.5px] transition-all active:scale-95 disabled:opacity-30",
+            confirmClear
+              ? "border-[rgba(255,90,140,.6)] text-[#ff8fb0]"
+              : "border-line-strong text-[#eaf1ff]",
+          )}
+          style={{
+            background: confirmClear
+              ? "rgba(255,90,140,.12)"
+              : "rgba(255,255,255,0.04)",
+          }}
+        >
+          {confirmClear ? "Clear all?" : "🗑 Clear"}
+        </button>
         <HintButton
           used={hintsUsed}
           max={MAX_HINTS}
@@ -555,15 +740,27 @@ export function Forge({
       </div>
 
       {/* legend */}
-      <p className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center font-mono text-[11px] text-ink-faint">
-        <span>
-          <span style={{ color: FILL }}>■</span> tap to fill
-        </span>
-        <span aria-hidden>·</span>
-        <span>
-          <span style={{ color: MARK }}>✕</span> long-press / Mark to rule out
-        </span>
-      </p>
+      {won ? (
+        <button
+          type="button"
+          onClick={() => setShowModal(true)}
+          className="mt-3 rounded-pill border border-line-strong bg-white/[0.04] px-5 py-2 font-mono text-[11px] tracking-[0.08em] text-ink-soft transition-transform active:scale-95"
+        >
+          View your solved {puzzle.glyphName} ↗
+        </button>
+      ) : (
+        <p className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center font-mono text-[11px] text-ink-faint">
+          <span>
+            <span style={{ color: FILL }}>■</span> tap to fill
+          </span>
+          <span aria-hidden>·</span>
+          <span>
+            <span style={{ color: MARK }}>✕</span> long-press / Mark to rule out
+          </span>
+          <span aria-hidden>·</span>
+          <span>↺ undo · 🗑 clear</span>
+        </p>
+      )}
 
       <CompletionModal
         open={showModal}
@@ -591,6 +788,7 @@ function Row({
   rowDone,
   solveBurst,
   hintCell,
+  errorCell,
   reducedMotion,
   onActivate,
   onContext,
@@ -606,6 +804,7 @@ function Row({
   rowDone: boolean;
   solveBurst: boolean;
   hintCell: number | null;
+  errorCell: number | null;
   reducedMotion: boolean;
   onActivate: (i: number) => void;
   onContext: (e: React.MouseEvent, i: number) => void;
@@ -647,6 +846,9 @@ function Row({
         const inSolution = puzzle.solution[r][c] === 1;
         const label = filled ? "filled" : marked ? "marked empty" : "empty";
         const justHinted = hintCell === i;
+        const justErrored = errorCell === i;
+        const rowClueText = clueText(puzzle.rowClues[r]);
+        const colClueText = clueText(puzzle.colClues[c]);
         // Stagger the solve ripple diagonally for a forged-glyph reveal.
         const burstDelay = solveBurst && filled ? (r + c) * 45 : 0;
         return (
@@ -654,8 +856,8 @@ function Row({
             key={i}
             type="button"
             role="gridcell"
-            aria-label={`Row ${r + 1} column ${c + 1}, ${label}`}
-            aria-selected={filled}
+            aria-label={`Row ${r + 1} (clue ${rowClueText}), column ${c + 1} (clue ${colClueText}), ${label}`}
+            aria-selected={sel}
             tabIndex={sel ? 0 : -1}
             disabled={won && !filled}
             onClick={() => onActivate(i)}
@@ -668,31 +870,40 @@ function Row({
               !reducedMotion && "transition-all duration-150 active:scale-90",
               !reducedMotion && solveBurst && filled && "animate-solve",
               !reducedMotion && justHinted && "animate-solve",
+              !reducedMotion && justErrored && "animate-shake",
               "focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-[#ffcf7a] focus-visible:ring-offset-0",
             )}
             style={{
               minWidth: 0,
-              background: filled
-                ? FILL
-                : marked
-                  ? "rgba(255,90,140,.08)"
-                  : `${ACCENT.solid}10`,
-              border: filled
-                ? `1px solid ${FILL}`
-                : sel
-                  ? "1px solid rgba(255,176,32,.75)"
+              background: justErrored
+                ? "rgba(255,90,140,.22)"
+                : filled
+                  ? FILL
                   : marked
-                    ? "1px solid rgba(255,90,140,.25)"
-                    : "1px solid rgba(255,255,255,.1)",
-              boxShadow: filled
-                ? `0 0 12px ${FILL_GLOW}`
-                : sel
-                  ? "0 0 0 2px rgba(255,176,32,.3)"
-                  : "none",
+                    ? "rgba(255,90,140,.08)"
+                    : `${ACCENT.solid}10`,
+              border: justErrored
+                ? "1px solid rgba(255,90,140,.85)"
+                : filled
+                  ? `1px solid ${FILL}`
+                  : sel
+                    ? "1px solid rgba(255,176,32,.75)"
+                    : marked
+                      ? "1px solid rgba(255,90,140,.25)"
+                      : "1px solid rgba(255,255,255,.1)",
+              boxShadow: justErrored
+                ? "0 0 12px rgba(255,90,140,.5)"
+                : filled
+                  ? `0 0 12px ${FILL_GLOW}`
+                  : sel
+                    ? "0 0 0 2px rgba(255,176,32,.3)"
+                    : "none",
               color: MARK,
               animationDelay: burstDelay ? `${burstDelay}ms` : undefined,
-              // keep glyph cells comfortably tappable on small phones
-              minHeight: "clamp(44px, 14vw, 56px)",
+              // Keep glyph cells comfortably tappable on small phones; the 7×7
+              // hard grid needs a lower floor so it still fits at ≤360px wide.
+              minHeight:
+                size >= 7 ? "clamp(36px, 11vw, 48px)" : "clamp(44px, 14vw, 56px)",
             }}
           >
             <span

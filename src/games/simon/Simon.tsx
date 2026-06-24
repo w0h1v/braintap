@@ -73,6 +73,10 @@ export function Simon({
   const [won, setWon] = useState(false);
   const [wrongPad, setWrongPad] = useState<number | null>(null);
   const [progress, setProgress] = useState(0); // steps tapped in the current round
+  // Screen-reader channel for the otherwise visual-only sequence: each pad is
+  // appended (by name) to this assertive live region as it flashes during
+  // playback, giving SR users a parseable mapping the colour pads can't.
+  const [srSequence, setSrSequence] = useState("");
 
   // Mutable refs used inside async playback timers.
   const stepRef = useRef(0);
@@ -121,6 +125,7 @@ export function Simon({
     setWon(false);
     setFinalRounds(0);
     setShowModal(false);
+    setSrSequence("");
     stepRef.current = 0;
     t0Ref.current = 0;
   }, [puzzleSig, clearTimers, setPhaseBoth]);
@@ -149,12 +154,18 @@ export function Simon({
       setPhaseBoth("watching");
       setProgress(0);
       setMessage("Watch…");
+      setSrSequence("Watch the sequence:");
       const seq = sequenceForRound(puzzle, forRound);
       const baseGap = gapForRound(forRound, speedRef.current);
       const gap = reducedMotion ? Math.max(360, baseGap) : baseGap;
       let t = 0;
-      seq.forEach((pad) => {
-        schedule(() => flash(pad, gap * 0.62), t);
+      seq.forEach((pad, i) => {
+        schedule(() => {
+          flash(pad, gap * 0.62);
+          // Build the spoken sequence as it plays so SR users get each pad in
+          // order ("cyan, magenta, …") rather than colour-only pad labels.
+          setSrSequence((prev) => (i === 0 ? `Sequence: ${PAD_NAMES[pad]}` : `${prev}, ${PAD_NAMES[pad]}`));
+        }, t);
         t += gap;
       });
       schedule(() => {
@@ -204,6 +215,11 @@ export function Simon({
   );
 
   const start = useCallback(() => {
+    // Defend the invariant in one place: a run already in progress (sequence
+    // playing or awaiting the player) can never be restarted mid-flight, no
+    // matter which control (button, keyboard) fired this. The disabled button
+    // and key-phase guards are belt-and-suspenders on top of this.
+    if (phaseRef.current === "watching" || phaseRef.current === "input") return;
     clearTimers();
     completedRef.current = false;
     setShowModal(false);
@@ -212,6 +228,7 @@ export function Simon({
     setLit(null);
     setProgress(0);
     setFinalRounds(0);
+    setSrSequence("");
     setRound(1);
     stepRef.current = 0;
     t0Ref.current = Date.now();
@@ -223,11 +240,21 @@ export function Simon({
       if (phaseRef.current !== "input") return;
       const step = stepRef.current;
       const correct = isCorrectTap(puzzle, round, step, pad);
-      // Echo feedback regardless, so the tap feels alive.
-      flash(pad, 280);
 
       if (!correct) {
+        // Wrong tap: keep the error channel unambiguous. Light the wrong pad
+        // WITHOUT its melodic tone (only the low sawtooth wrong() should sound),
+        // and briefly flash the pad the player *should* have hit so they can see
+        // the step they broke on before the modal rises.
+        flash(pad, 280, false);
         setWrongPad(pad);
+        const expected = sequenceForRound(puzzle, round)[step];
+        if (typeof expected === "number" && expected !== pad) {
+          // Recap flash of the correct pad, silent + slightly delayed so it
+          // reads as a hint distinct from the wrong-pad shake.
+          schedule(() => flash(expected, 360, false), reducedMotion ? 0 : 120);
+        }
+        setSrSequence(`Missed. The next pad was ${PAD_NAMES[expected] ?? "unknown"}.`);
         haptics.error();
         sfx.wrong();
         setPhaseBoth("over");
@@ -238,6 +265,8 @@ export function Simon({
         return;
       }
 
+      // Correct echo: tap feedback so it feels alive (melodic tone + flash).
+      flash(pad, 280);
       haptics.tap();
       const next = step + 1;
       stepRef.current = next;
@@ -259,7 +288,7 @@ export function Simon({
         nextRound(round);
       }
     },
-    [puzzle, round, target, flash, endGame, nextRound, setPhaseBoth],
+    [puzzle, round, target, flash, endGame, nextRound, setPhaseBoth, schedule, reducedMotion],
   );
 
   // Keyboard: 1–4 to tap pads; Enter/Space to start.
@@ -306,6 +335,12 @@ export function Simon({
       {/* polite SR status */}
       <span className="sr-only" aria-live="polite">
         {srStatus}
+      </span>
+
+      {/* SR-only spoken mapping of the sequence as it plays + the missed pad on
+          a slip, giving screen-reader users the channel the colour pads lack. */}
+      <span className="sr-only" aria-live="assertive">
+        {srSequence}
       </span>
 
       {/* stats */}
@@ -491,6 +526,11 @@ export function Simon({
         statLabel="STEPS RECALLED"
         insight={INSIGHT}
         share={shareFor(finalRounds)}
+        onReplay={() => {
+          setShowModal(false);
+          start();
+        }}
+        replayLabel={won ? "Play again" : "Try again"}
       />
     </div>
   );

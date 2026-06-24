@@ -143,8 +143,15 @@ export function MathSprint({
     setLiveStatus(
       `Time! ${finalScore} correct.` + (won ? " Goal reached." : ` Need ${goal} to clear.`),
     );
-    haptics.win();
-    sfx.win();
+    // Only play the celebratory cue on a win; a timeout-without-goal gets a
+    // softer neutral tone so the feedback matches the outcome.
+    if (won) {
+      haptics.win();
+      sfx.win();
+    } else {
+      haptics.tap();
+      sfx.place();
+    }
     setTimeout(() => setShowModal(true), reducedMotion ? 0 : 260);
     onComplete({
       status: won ? "won" : "lost",
@@ -176,7 +183,21 @@ export function MathSprint({
     };
     tick();
     const t = setInterval(tick, 200);
-    return () => clearInterval(t);
+    // setInterval is throttled/paused while the tab is backgrounded, which would
+    // otherwise let a player "recover" time by switching away. The deadline is an
+    // absolute wall-clock value, so reconcile against Date.now() the moment we
+    // become visible again (and on focus, which fires when returning to a PWA).
+    const reconcile = () => {
+      if (document.visibilityState !== "visible") return;
+      tick();
+    };
+    document.addEventListener("visibilitychange", reconcile);
+    window.addEventListener("focus", reconcile);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", reconcile);
+      window.removeEventListener("focus", reconcile);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
@@ -284,11 +305,28 @@ export function MathSprint({
     }
   }, [phase, entry, current.answer, ordinal, puzzle.seed, params, reducedMotion]);
 
+  const skip = useCallback(() => {
+    if (phase !== "playing") return;
+    // Advance to a fresh problem without crediting score, so a player who is
+    // stuck on one item keeps flowing. Skipping breaks the streak (it isn't a
+    // solve) but costs no time and is not counted as a mistake.
+    setStreak(0);
+    const nextOrdinal = ordinal + 1;
+    const nextProb = problemAt(puzzle.seed, nextOrdinal, params);
+    setOrdinal(nextOrdinal);
+    setEntry("");
+    setLiveStatus(`Skipped. Next: ${speakProblem(nextProb)}.`);
+    haptics.tap();
+    sfx.tap();
+  }, [phase, ordinal, puzzle.seed, params]);
+
   // ---- keyboard --------------------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (phase === "idle" || phase === "done") {
-        if (e.key === "Enter" || e.key === " ") {
+        // Don't let Enter/Space silently restart the sprint while the completion
+        // modal is open — it owns its own focusable actions there.
+        if ((e.key === "Enter" || e.key === " ") && !showModal) {
           start();
           e.preventDefault();
         }
@@ -306,11 +344,14 @@ export function MathSprint({
       } else if (e.key === "-") {
         pressSign();
         e.preventDefault();
+      } else if (e.key === "s" || e.key === "S") {
+        skip();
+        e.preventDefault();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [phase, pressDigit, submit, pressBackspace, pressSign, start]);
+  }, [phase, pressDigit, submit, pressBackspace, pressSign, skip, start, showModal]);
 
   const finalScore = score;
   const showStart = phase === "idle" || phase === "done";
@@ -333,7 +374,7 @@ export function MathSprint({
   ];
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex w-full flex-col items-center bt-safe-bottom">
       {/* stats row */}
       <div className="grid w-full max-w-[420px] grid-cols-3 gap-2.5">
         <StatCard
@@ -460,21 +501,40 @@ export function MathSprint({
             })}
           </div>
 
-          <button
-            type="button"
-            onClick={submit}
-            className={cn(
-              "mt-2.5 w-full max-w-[420px] rounded-xl py-3.5 font-display text-[15px] font-semibold text-[#04060f]",
-              !reducedMotion && "transition-transform duration-100 active:scale-[0.98]",
-            )}
-            style={{
-              minHeight: 48,
-              backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`,
-              boxShadow: `0 10px 30px ${ACCENT.solid}38`,
-            }}
-          >
-            Submit
-          </button>
+          <div className="mt-2.5 flex w-full max-w-[420px] gap-2.5">
+            <button
+              type="button"
+              onClick={skip}
+              aria-label="Skip this problem"
+              className={cn(
+                "shrink-0 rounded-xl border px-5 py-3.5 font-display text-[15px] font-semibold",
+                !reducedMotion && "transition-transform duration-100 active:scale-[0.98]",
+              )}
+              style={{
+                minHeight: 48,
+                color: "#eafcff",
+                background: "rgba(255,255,255,0.05)",
+                borderColor: "rgba(255,255,255,0.14)",
+              }}
+            >
+              Skip
+            </button>
+            <button
+              type="button"
+              onClick={submit}
+              className={cn(
+                "flex-1 rounded-xl py-3.5 font-display text-[15px] font-semibold text-[#04060f]",
+                !reducedMotion && "transition-transform duration-100 active:scale-[0.98]",
+              )}
+              style={{
+                minHeight: 48,
+                backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`,
+                boxShadow: `0 10px 30px ${ACCENT.solid}38`,
+              }}
+            >
+              Submit
+            </button>
+          </div>
         </>
       )}
 
@@ -491,7 +551,7 @@ export function MathSprint({
               Solve each problem and hit{" "}
               <span style={{ color: ACCENT.solid }}>submit</span> before the{" "}
               {params.durationSec}s clock runs out — wrong answers cost your streak, not your
-              time.
+              time. Stuck? Tap <span style={{ color: ACCENT.solid }}>Skip</span> to move on.
             </p>
           )}
           <button
@@ -517,13 +577,15 @@ export function MathSprint({
         open={showModal}
         onClose={() => setShowModal(false)}
         accent={ACCENT}
-        eyebrow="TIME!"
+        eyebrow={isWin(finalScore, params) ? "GOAL CLEARED" : "TIME!"}
         title={tierTitle(finalScore)}
         statValue={String(finalScore)}
         statLabel={`CORRECT · ${params.durationSec}S`}
         insight={INSIGHT}
         share={buildShareText(finalScore, bestStreak, params)}
         won={isWin(finalScore, params)}
+        onReplay={start}
+        replayLabel="Play again"
       />
     </div>
   );

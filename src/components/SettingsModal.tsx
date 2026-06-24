@@ -94,6 +94,17 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             label="Sound effects"
           />
         </div>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="font-display text-sm font-medium text-ink">Haptics</div>
+            <div className="text-xs text-ink-mute">Vibration feedback (works even when muted)</div>
+          </div>
+          <Toggle
+            checked={settings.haptics !== false}
+            onChange={(v) => setSetting("haptics", v)}
+            label="Haptics"
+          />
+        </div>
       </div>
 
       <button

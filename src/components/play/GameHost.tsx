@@ -238,7 +238,7 @@ export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: st
   };
 
   return (
-    <div className="mx-auto max-w-shell px-4 pb-16 pt-24 sm:px-6">
+    <div className="mx-auto max-w-shell px-4 pt-24 pb-[max(4rem,env(safe-area-inset-bottom))] sm:px-6">
       <WinCelebration trigger={winBurst} accent={meta.accent} reducedMotion={Boolean(reducedMotion)} />
       {/* header */}
       <div className="mb-4 flex items-center justify-between gap-3">

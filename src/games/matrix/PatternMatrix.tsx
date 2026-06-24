@@ -191,14 +191,26 @@ export function PatternMatrix({
   const [shakeIdx, setShakeIdx] = useState<number | null>(null);
   const [popIdx, setPopIdx] = useState<number | null>(null);
   const [showModal, setShowModal] = useState(false);
+  // Live-region message for screen readers (wrong picks / reveals); the static
+  // status line covers the rest.
+  const [liveMsg, setLiveMsg] = useState("");
   const finalMsRef = useRef(saved?.done ? (saved?.elapsedMs ?? 0) : 0);
-  const completedRef = useRef(false);
+  const completedRef = useRef(saved?.done ?? false);
 
   const clock = useGameClock(!done, saved?.elapsedMs ?? 0);
   const strikesLeft = puzzle.strikes - strikesUsed;
 
-  // Persist resumable state on every meaningful change.
+  // Resuming a finished puzzle should re-surface the celebratory/result modal
+  // (MOB: persisted done state otherwise loses the share + recap entirely).
   useEffect(() => {
+    if (saved?.done) setShowModal(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep a snapshot ref so the visibility/unmount flush below can persist the
+  // *live* clock value without re-binding listeners on every state change.
+  const persistRef = useRef<() => void>(() => {});
+  persistRef.current = () => {
     onPersistState?.({
       selected,
       picked,
@@ -209,8 +221,27 @@ export function PatternMatrix({
       won,
       elapsedMs: done ? finalMsRef.current : clock.ms,
     });
+  };
+
+  // Persist resumable state on every meaningful change.
+  useEffect(() => {
+    persistRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, picked, strikesUsed, hintsUsed, revealedRules, done, won]);
+
+  // Flush the live elapsed time when the tab is hidden or the game unmounts,
+  // so resume time doesn't drift back to the last state-change snapshot.
+  useEffect(() => {
+    const flush = () => persistRef.current();
+    const onVis = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      flush();
+    };
+  }, []);
 
   const computeScore = useCallback(
     (ms: number, strikes: number, hints: number, didWin: boolean) => {
@@ -225,7 +256,7 @@ export function PatternMatrix({
   );
 
   const finish = useCallback(
-    (didWin: boolean, finalStrikes: number) => {
+    (didWin: boolean, finalStrikes: number, suppressCue = false) => {
       if (completedRef.current) return;
       completedRef.current = true;
       clock.stop();
@@ -233,12 +264,19 @@ export function PatternMatrix({
       finalMsRef.current = timeMs;
       setDone(true);
       setWon(didWin);
+      // The win cue is always owned here. The loss cue is owned by confirm()'s
+      // strike feedback when a wrong pick ends the round, so skip it then to
+      // avoid a doubled error buzz/sound.
       if (didWin) {
         haptics.win();
         sfx.win();
-      } else {
+        setLiveMsg("Correct. Matrix solved.");
+      } else if (!suppressCue) {
         haptics.error();
         sfx.wrong();
+        setLiveMsg("Out of strikes. The answer is now revealed on the board.");
+      } else {
+        setLiveMsg("Incorrect. Out of strikes. The answer is now revealed on the board.");
       }
       const score = computeScore(timeMs, finalStrikes, hintsUsed, didWin);
       const sec = Math.round(timeMs / 1000);
@@ -263,13 +301,13 @@ export function PatternMatrix({
     if (done || selected == null || picked.includes(selected)) return;
     if (selected === puzzle.answerIndex) {
       setPopIdx(selected);
-      sfx.correct();
-      haptics.success();
+      // No correct/success cue here: finish() owns the single terminal win cue.
       finish(true, strikesUsed);
       return;
     }
     // wrong pick
     const nextStrikes = strikesUsed + 1;
+    const nextLeft = puzzle.strikes - nextStrikes;
     setPicked((p) => (p.includes(selected) ? p : [...p, selected]));
     setStrikesUsed(nextStrikes);
     sfx.wrong();
@@ -280,9 +318,32 @@ export function PatternMatrix({
     }
     setSelected(null);
     if (nextStrikes >= puzzle.strikes) {
-      finish(false, nextStrikes);
+      // finish() announces the strike-out; suppress its cue (already played).
+      finish(false, nextStrikes, true);
+    } else {
+      setLiveMsg(`Incorrect. Strikes left: ${nextLeft}.`);
     }
   }, [done, selected, picked, puzzle.answerIndex, puzzle.strikes, strikesUsed, reducedMotion, finish]);
+
+  // Replay the same puzzle: clear local progress and restart the clock. Score
+  // is not re-submitted unless the player finishes again, matching other games.
+  const handleReplay = useCallback(() => {
+    setShowModal(false);
+    completedRef.current = false;
+    finalMsRef.current = 0;
+    setSelected(null);
+    setPicked([]);
+    setStrikesUsed(0);
+    setHintsUsed(0);
+    setRevealedRules([]);
+    setShakeIdx(null);
+    setPopIdx(null);
+    setWon(false);
+    setLiveMsg("");
+    setDone(false);
+    clock.reset();
+    clock.start();
+  }, [clock]);
 
   const handleSelect = useCallback(
     (i: number) => {
@@ -325,8 +386,10 @@ export function PatternMatrix({
     [done, picked, puzzle.optionCount],
   );
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+  // Keyboard is scoped to the radiogroup (below) instead of the whole window,
+  // so it no longer hijacks Space/Enter/arrows for the rest of the page.
+  const onGroupKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (done) return;
       if (e.key === "ArrowRight" || e.key === "ArrowDown") {
         move(e.key === "ArrowDown" ? cols : 1);
@@ -334,16 +397,17 @@ export function PatternMatrix({
       } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
         move(e.key === "ArrowUp" ? -cols : -1);
         e.preventDefault();
-      } else if (e.key === "Enter" || e.key === " ") {
+      } else if (e.key === "Enter") {
+        // Space already fires a native click on the focused radio button; only
+        // intercept Enter, and only when a selection exists to confirm.
         if (selected != null) {
           confirm();
           e.preventDefault();
         }
       }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [done, move, cols, selected, confirm]);
+    },
+    [done, move, cols, selected, confirm],
+  );
 
   const status = done
     ? won
@@ -358,6 +422,10 @@ export function PatternMatrix({
     <div className="flex w-full flex-col items-center">
       <p className="sr-only" role="status" aria-live="polite">
         {status}
+      </p>
+      {/* Assertive channel for pick/strike/reveal results (controls + a11y). */}
+      <p className="sr-only" role="alert" aria-live="assertive">
+        {liveMsg}
       </p>
 
       {/* meta row: tier + strike pips + timer */}
@@ -419,23 +487,31 @@ export function PatternMatrix({
       >
         {Array.from({ length: GRID }, (_, i) => {
           const isMissing = i === GRID - 1;
-          const answered = done && won && isMissing;
+          // Reveal the canonical answer in the missing cell on BOTH outcomes —
+          // win celebrates, loss teaches (the prompt copy promises it's shown).
+          const revealed = done && isMissing;
           return (
             <div
               key={i}
               className={cn(
                 "relative flex items-center justify-center rounded-xl",
-                !reducedMotion && answered && "animate-pop",
+                !reducedMotion && revealed && "animate-pop",
               )}
               style={{
-                background: isMissing ? "rgba(6,10,22,0.4)" : "rgba(6,10,22,0.55)",
+                background: isMissing
+                  ? revealed && !won
+                    ? "rgba(40,12,16,0.5)"
+                    : "rgba(6,10,22,0.4)"
+                  : "rgba(6,10,22,0.55)",
                 border: isMissing
-                  ? `2px dashed ${ACCENT.solid}88`
+                  ? revealed && !won
+                    ? "2px solid rgba(255,120,120,0.6)"
+                    : `2px dashed ${ACCENT.solid}88`
                   : `1px solid rgba(255,255,255,0.07)`,
               }}
             >
               {isMissing ? (
-                answered ? (
+                revealed ? (
                   <TileGlyph tile={puzzle.cells[GRID - 1]} size={tileSize} paletteSize={puzzle.paletteSize} />
                 ) : (
                   <span
@@ -493,11 +569,18 @@ export function PatternMatrix({
         }}
         role="radiogroup"
         aria-label="Answer options"
+        onKeyDown={onGroupKeyDown}
       >
         {puzzle.options.map((opt, i) => {
           const isPickedWrong = picked.includes(i);
           const isSel = selected === i;
           const isAnswerReveal = done && i === puzzle.answerIndex;
+          // Roving tabindex: the selected radio is the lone tab stop; with no
+          // selection yet, the first still-pickable option carries it.
+          const rovingIdx =
+            selected != null
+              ? selected
+              : puzzle.options.findIndex((_, k) => !picked.includes(k));
           return (
             <button
               key={i}
@@ -507,7 +590,8 @@ export function PatternMatrix({
               type="button"
               role="radio"
               aria-checked={isSel}
-              aria-label={`${describeTile(opt)}${isPickedWrong ? ", already tried, incorrect" : ""}`}
+              tabIndex={done ? -1 : i === rovingIdx ? 0 : -1}
+              aria-label={`${describeTile(opt)}${isPickedWrong ? ", already tried, incorrect" : isAnswerReveal && done ? ", correct answer" : ""}`}
               disabled={done || isPickedWrong}
               onClick={() => handleSelect(i)}
               className={cn(
@@ -538,30 +622,57 @@ export function PatternMatrix({
         })}
       </div>
 
-      {/* controls: confirm + hint */}
+      {/* controls: during play → confirm + hint; after → replay + view result
+          so the player can recover even after dismissing the modal. */}
       <div
         className="mt-4 flex w-full items-center justify-center gap-3"
         style={{ maxWidth: "min(92vw, 380px)" }}
       >
-        <button
-          type="button"
-          onClick={confirm}
-          disabled={done || selected == null}
-          className={cn(
-            "min-h-[48px] flex-1 rounded-pill px-5 py-3 font-display text-[15px] font-semibold text-[#04060f] outline-none disabled:opacity-40",
-            !reducedMotion && "transition-transform active:scale-[0.98]",
-          )}
-          style={{ backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})` }}
-        >
-          Confirm
-        </button>
-        <HintButton
-          used={hintsUsed}
-          max={maxHints}
-          onHint={handleHint}
-          accent={ACCENT}
-          disabled={done}
-        />
+        {done ? (
+          <>
+            <button
+              type="button"
+              onClick={handleReplay}
+              className={cn(
+                "min-h-[48px] flex-1 rounded-pill px-5 py-3 font-display text-[15px] font-semibold text-[#04060f] outline-none",
+                !reducedMotion && "transition-transform active:scale-[0.98]",
+              )}
+              style={{ backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})` }}
+            >
+              ↻ {won ? "Play again" : "Try again"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowModal(true)}
+              className="min-h-[48px] rounded-pill border px-5 py-3 font-display text-[15px] font-semibold outline-none"
+              style={{ borderColor: `${ACCENT.solid}55`, background: `${ACCENT.solid}14`, color: ACCENT.soft }}
+            >
+              View result
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={confirm}
+              disabled={selected == null}
+              className={cn(
+                "min-h-[48px] flex-1 rounded-pill px-5 py-3 font-display text-[15px] font-semibold text-[#04060f] outline-none disabled:opacity-40",
+                !reducedMotion && "transition-transform active:scale-[0.98]",
+              )}
+              style={{ backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})` }}
+            >
+              Confirm
+            </button>
+            <HintButton
+              used={hintsUsed}
+              max={maxHints}
+              onHint={handleHint}
+              accent={ACCENT}
+              disabled={done}
+            />
+          </>
+        )}
       </div>
 
       <CompletionModal
@@ -574,6 +685,8 @@ export function PatternMatrix({
         statLabel="SOLVE TIME"
         insight={INSIGHT}
         share={shareLine(finalMsRef.current, strikesUsed, puzzle.strikes, won)}
+        onReplay={handleReplay}
+        replayLabel={won ? "Play again" : "Try again"}
       />
     </div>
   );

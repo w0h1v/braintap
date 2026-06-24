@@ -54,6 +54,18 @@ function tileGlow(v: number): string {
   return "0 2px 10px rgba(0,0,0,0.25)";
 }
 
+/**
+ * A redundant, non-color cue for tile tier so value isn't conveyed by colour
+ * alone: milestone tiles gain a progressively stronger inset ring. The number
+ * itself remains the primary cue.
+ */
+function tileRing(v: number): string | undefined {
+  if (v >= WIN_TILE) return "inset 0 0 0 2.5px rgba(255,255,255,0.9)";
+  if (v >= 512) return "inset 0 0 0 2px rgba(255,255,255,0.6)";
+  if (v >= 128) return "inset 0 0 0 1.5px rgba(255,255,255,0.35)";
+  return undefined;
+}
+
 function tileFontSize(v: number): string {
   if (v >= 1024) return "clamp(15px, 5vw, 22px)";
   if (v >= 128) return "clamp(18px, 6vw, 26px)";
@@ -148,6 +160,11 @@ export function G2048({
   const target = targetOf(puzzle);
 
   const [grid, setGrid] = useState<number[]>(() => saved?.grid ?? puzzle.start.slice());
+  // Logical board for accessibility: updated SYNCHRONOUSLY the instant a move
+  // resolves, before the slide animation commits the visual `grid` (SLIDE_MS
+  // later). The gridcell aria-labels read from this so screen readers always
+  // describe the true post-move board, never the stale committed grid.
+  const [labelGrid, setLabelGrid] = useState<number[]>(() => saved?.grid ?? puzzle.start.slice());
   const [score, setScore] = useState(() => saved?.score ?? 0);
   const [best, setBest] = useState(() => saved?.best ?? 0);
   const [spawnIndex, setSpawnIndex] = useState(() => saved?.spawnIndex ?? 0);
@@ -264,6 +281,16 @@ export function G2048({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [grid, score, best, spawnIndex, won, over, continued]);
 
+  // Once the run locks (game over, or won-and-not-continued), discard the undo
+  // bank so the disabled Undo button is honest: the terminal move cannot be
+  // taken back. "Keep playing" un-locks for a fresh sequence of undoable moves.
+  useEffect(() => {
+    if (locked) {
+      undoRef.current = null;
+      setUndoAvailable(false);
+    }
+  }, [locked]);
+
   // Clear any pending timers on unmount.
   useEffect(() => {
     return () => {
@@ -295,6 +322,7 @@ export function G2048({
     completedRef.current = saved?.completed ?? false;
     movesRef.current = 0;
     setGrid(nextGrid);
+    setLabelGrid(nextGrid);
     setScore(saved?.score ?? 0);
     setBest(saved?.best ?? 0);
     setSpawnIndex(saved?.spawnIndex ?? 0);
@@ -311,11 +339,20 @@ export function G2048({
 
   const fireComplete = useCallback(
     (finalGrid: number[], finalScore: number, didWin: boolean) => {
-      if (completedRef.current) return;
-      completedRef.current = true;
-      // Freeze the play time at the moment the run ends.
+      // Freeze the play time at the moment the run ends. (Always do this so a
+      // replayed run reports a correct clock even if the daily was recorded.)
       const timeMs = settleElapsed();
       finalMsRef.current = timeMs;
+
+      // Always surface the result UI (modal + confetti) on every win/loss, even
+      // on a replay after the daily has been recorded. The one-time recording of
+      // the daily result is gated separately on completedRef below.
+      if (!reducedMotion) setTimeout(() => setShowModal(true), 300);
+      else setShowModal(true);
+
+      // Record the daily result exactly once.
+      if (completedRef.current) return;
+      completedRef.current = true;
       const top = maxTile(finalGrid);
       // Normalised 0–100: reaching the tier target is a 100; otherwise scale by
       // the largest tile reached relative to the target (each doubling is one
@@ -328,8 +365,6 @@ export function G2048({
       const shareText = `BrainTap · 2048\n${
         didWin ? `Reached ${target}! 🟪` : `Best tile ${top} · Score ${finalScore}`
       }\n\nbraintap.app/games`;
-      if (!reducedMotion) setTimeout(() => setShowModal(true), 300);
-      else setShowModal(true);
       onComplete({
         status: didWin ? "won" : "lost",
         score: score100,
@@ -388,6 +423,10 @@ export function G2048({
 
       const nextScore = score + res.gained;
       const nextBest = Math.max(best, nextScore);
+
+      // Commit the logical board for accessibility immediately, regardless of
+      // the animation phase, so aria-labels never lag behind the real state.
+      setLabelGrid(after);
 
       setScore(nextScore);
       setBest(nextBest);
@@ -492,6 +531,7 @@ export function G2048({
     animTimers.current = [];
     animatingRef.current = false;
     setGrid(snap.grid.slice());
+    setLabelGrid(snap.grid.slice());
     setScore(snap.score);
     setBest(snap.best);
     setSpawnIndex(snap.spawnIndex);
@@ -526,6 +566,7 @@ export function G2048({
     undoRef.current = null;
     setUndoAvailable(false);
     setGrid(fresh);
+    setLabelGrid(fresh);
     setScore(0);
     setSpawnIndex(0);
     setWon(false);
@@ -590,7 +631,12 @@ export function G2048({
     setShowModal(false);
   }, []);
 
-  const finalTop = useMemo(() => maxTile(grid), [grid]);
+  // Largest tile, from the logical board so it tracks moves synchronously.
+  const finalTop = useMemo(() => maxTile(labelGrid), [labelGrid]);
+
+  // Next power-of-two milestone above the current best tile — used to give
+  // "Keep playing" a concrete, named goal once the tier target is reached.
+  const nextMilestone = useMemo(() => finalTop * 2, [finalTop]);
 
   // Progress toward the tier target, by doublings (2 → target).
   const progress = useMemo(() => {
@@ -604,7 +650,7 @@ export function G2048({
     : won && !continued
       ? `🎉 You reached ${target}!`
       : won
-        ? "Keep merging for a higher score"
+        ? `Next milestone: reach ${nextMilestone}`
         : "";
 
   // Screen-reader status: concise board summary + state. When the host is NOT
@@ -730,7 +776,9 @@ export function G2048({
           {Array.from({ length: CELLS }, (_, i) => {
             const r = Math.floor(i / SIZE);
             const c = i % SIZE;
-            const v = grid[i];
+            // Labels read the logical (synchronously-committed) board so screen
+            // readers describe the real post-move state, not the stale visual grid.
+            const v = labelGrid[i];
             return (
               <div
                 key={i}
@@ -772,7 +820,7 @@ export function G2048({
                   background: bg,
                   color: fg,
                   fontSize: tileFontSize(t.value),
-                  boxShadow: tileGlow(t.value),
+                  boxShadow: [tileRing(t.value), tileGlow(t.value)].filter(Boolean).join(", "),
                   zIndex: t.pop ? 3 : t.spawn ? 2 : 1,
                   transition: reducedMotion
                     ? undefined
@@ -861,10 +909,14 @@ export function G2048({
         statValue={String(score)}
         statLabel="SCORE"
         insight={INSIGHT}
+        onReplay={restart}
+        replayLabel="Play again"
         extra={
           <div className="flex flex-col items-center gap-3">
-            <div className="font-mono text-[11px] tracking-[0.1em]" style={{ color: ACCENT.soft }}>
-              BEST TILE {finalTop}
+            <div className="flex items-center gap-2.5 font-mono text-[11px] tracking-[0.1em]" style={{ color: ACCENT.soft }}>
+              <span>BEST TILE {finalTop}</span>
+              <span aria-hidden style={{ color: "rgba(226,234,255,0.3)" }}>·</span>
+              <span style={{ color: "#00e5ff" }}>BEST SCORE {best}</span>
             </div>
             {won && !over && !continued && (
               <button
@@ -876,7 +928,7 @@ export function G2048({
                 )}
                 style={{ borderColor: `${ACCENT.solid}66`, background: `${ACCENT.solid}1f` }}
               >
-                Keep playing →
+                Keep playing — chase {nextMilestone} →
               </button>
             )}
           </div>
