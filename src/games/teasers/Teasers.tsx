@@ -85,6 +85,10 @@ export function Teasers({
   // Guards advance() against a rapid second key/tap firing before the index
   // (and `answered`) settle, which could otherwise skip the next riddle.
   const advanceLock = useRef(false);
+  // The index already committed this turn — guards commit() against a rapid
+  // second Enter/Space firing the correct/wrong feedback twice (the picks[]
+  // guard reads a stale closure). Reset whenever the riddle index changes.
+  const committedRef = useRef(-1);
 
   const total = puzzle.riddles.length;
   const riddle = puzzle.riddles[Math.min(index, total - 1)];
@@ -128,6 +132,7 @@ export function Teasers({
   useEffect(() => {
     setPending(-1);
     advanceLock.current = false;
+    committedRef.current = -1;
   }, [index]);
 
   // Persist resumable state (JSON-serialisable).
@@ -141,6 +146,10 @@ export function Teasers({
   const commit = useCallback(
     (choice: number) => {
       if (done || index >= total || picks[index] !== -1 || choice < 0) return;
+      // Ref guard: stale `picks` lets two same-tick Enters both pass the check
+      // above, double-firing the feedback. The ref is current within the batch.
+      if (committedRef.current === index) return;
+      committedRef.current = index;
       const right = choice === puzzle.riddles[index].answerIndex;
       setPicks((prev) => {
         const next = prev.slice();

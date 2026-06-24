@@ -159,19 +159,18 @@ export function Simon({
       const baseGap = gapForRound(forRound, speedRef.current);
       const gap = reducedMotion ? Math.max(360, baseGap) : baseGap;
       let t = 0;
-      seq.forEach((pad, i) => {
-        schedule(() => {
-          flash(pad, gap * 0.62);
-          // Build the spoken sequence as it plays so SR users get each pad in
-          // order ("cyan, magenta, …") rather than colour-only pad labels.
-          setSrSequence((prev) => (i === 0 ? `Sequence: ${PAD_NAMES[pad]}` : `${prev}, ${PAD_NAMES[pad]}`));
-        }, t);
+      seq.forEach((pad) => {
+        schedule(() => flash(pad, gap * 0.62), t);
         t += gap;
       });
       schedule(() => {
         stepRef.current = 0;
         setPhaseBoth("input");
         setMessage("Your turn");
+        // Announce the full sequence ONCE now that playback is done. An
+        // incremental per-flash announce in an assertive region self-interrupts
+        // and never finishes speaking on faster tiers.
+        setSrSequence(`Sequence: ${seq.map((p) => PAD_NAMES[p]).join(", ")}`);
       }, t + 140);
     },
     [puzzle, reducedMotion, flash, schedule, setPhaseBoth],
@@ -252,7 +251,10 @@ export function Simon({
         if (typeof expected === "number" && expected !== pad) {
           // Recap flash of the correct pad, silent + slightly delayed so it
           // reads as a hint distinct from the wrong-pad shake.
-          schedule(() => flash(expected, 360, false), reducedMotion ? 0 : 120);
+          // Even in reduced motion, delay the recap so the wrong pad's own flash
+          // is visible first (the shake is off in reduced motion, so this flash
+          // is the only feedback attributing the slip to the tapped pad).
+          schedule(() => flash(expected, 360, false), reducedMotion ? 180 : 120);
         }
         setSrSequence(`Missed. The next pad was ${PAD_NAMES[expected] ?? "unknown"}.`);
         haptics.error();
@@ -337,9 +339,10 @@ export function Simon({
         {srStatus}
       </span>
 
-      {/* SR-only spoken mapping of the sequence as it plays + the missed pad on
-          a slip, giving screen-reader users the channel the colour pads lack. */}
-      <span className="sr-only" aria-live="assertive">
+      {/* SR-only spoken mapping of the full sequence (announced once after
+          playback) + the missed pad on a slip, giving screen-reader users the
+          channel the colour pads lack. Polite so it never self-interrupts. */}
+      <span className="sr-only" aria-live="polite">
         {srSequence}
       </span>
 

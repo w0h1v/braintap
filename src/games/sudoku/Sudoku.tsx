@@ -59,6 +59,8 @@ interface SudokuState {
   notes: number[][];
   elapsedMs: number;
   won: boolean;
+  /** True when the win was a "reveal solution" give-up, not a genuine solve. */
+  gaveUp?: boolean;
   hintsUsed?: number;
   hintCells?: number[];
 }
@@ -114,7 +116,7 @@ export function Sudoku({
   const [wrongCells, setWrongCells] = useState<Set<number>>(() => new Set());
   // GIVE-UP: when the player reveals the solution, the board fills read-only so
   // they can review the answer rather than abandoning a stuck puzzle.
-  const [gaveUp, setGaveUp] = useState(false);
+  const [gaveUp, setGaveUp] = useState(saved?.gaveUp ?? false);
   // Cells briefly flashing after their row/column/box was completed (VIS-1).
   const [flashCells, setFlashCells] = useState<Set<number>>(() => new Set());
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -213,11 +215,12 @@ export function Sudoku({
       notes: notes.map((s) => [...s]),
       elapsedMs: won ? finalMsRef.current : clock.ms,
       won,
+      gaveUp,
       hintsUsed,
       hintCells: [...hintCells],
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, notes, won, hintsUsed, hintCells]);
+  }, [entries, notes, won, gaveUp, hintsUsed, hintCells]);
 
   const finish = useCallback(() => {
     clock.stop();
