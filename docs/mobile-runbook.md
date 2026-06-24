@@ -22,7 +22,16 @@ on the website, so `braintap.vercel.app` behaves exactly as before.
   `src/app/auth/callback`, the four OG/Twitter image routes), runs
   `BUILD_TARGET=mobile` (`output: "export"`), restores them. Produces a complete
   `out/` (35 pages). The web build (`npm run build`) is unaffected. Because the
-  web OAuth callback is excluded, mobile auth must use a native deep-link flow.
+  web OAuth callback is excluded, **native auth uses id-token sign-in** (below),
+  not the web redirect flow.
+- **Native auth** (`feat/auth-siwa-launch-prep`, PR #12): **Sign in with Apple +
+  Google**, both native on iOS via `@capgo/capacitor-social-login` →
+  `supabase.auth.signInWithIdToken` with nonce handling
+  (`src/lib/native/{nonce,socialLogin,exchange}.ts`). `auth.tsx` branches on
+  `Capacitor.isNativePlatform()`; web OAuth-redirect path unchanged. SIWA is
+  required by Guideline 4.8 because a Google login button ships. Console/Xcode
+  setup (Apple Services ID + key, Google OAuth clients, SIWA capability, Supabase
+  providers) is in the PR #12 handoff.
 - **RevenueCat** wired in `src/lib/entitlement.tsx`: configures the SDK with the
   per-platform public key (`NEXT_PUBLIC_REVENUECAT_IOS_KEY` / `_ANDROID_KEY`),
   reads `CustomerInfo`, sets `isPremium` from the **`Braintap Pro`** entitlement,
@@ -61,11 +70,18 @@ real apps (below).
 
 ## Remaining to launch (human + accounts — not doable headless)
 
+0. **Native auth (Sign in with Apple + Google).** Apple Developer: enable SIWA on
+   the App ID, create a Services ID + `.p8` key. Google Cloud: iOS + web OAuth
+   clients. Xcode: add the SIWA capability (+ entitlement/signing) and the
+   reversed-client-id URL scheme; bundle `PrivacyInfo.xcprivacy`. Supabase: enable
+   Apple + Google providers (authorized client ids). Set
+   `NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID` / `_WEB_CLIENT_ID`. Full ordered steps in
+   PR #12.
 1. **Real store apps + products + public SDK keys.** Add a real **iOS app** and
    **Android app** to the RevenueCat project (this generates the public
    `appl_…` / `goog_…` SDK keys → set `NEXT_PUBLIC_REVENUECAT_*`). Create the
-   matching **subscription/IAP products** in App Store Connect / Play Console and
-   attach them to `Braintap Pro` + the `default` offering. (Needs Apple $99/yr +
+   matching **non-consumable `lifetime` IAP** in App Store Connect / Play Console
+   and attach it to `Braintap Pro` + the `default` offering. (Needs Apple $99/yr +
    Google $25 accounts.)
 2. **Real AdMob ids.** Create the app + a **rewarded** and **interstitial** unit
    in AdMob; set `NEXT_PUBLIC_ADMOB_*` and the real `GADApplicationIdentifier`
@@ -77,10 +93,13 @@ real apps (below).
    simulator/device, then exercise the flows by hand: Archive → a locked day →
    Paywall → purchase (StoreKit/Test Store sheet); use hints past the free
    threshold → a test rewarded ad. Requires Apple code-signing for a real device.
-5. **Consent / privacy / store compliance.** iOS **ATT** prompt (call
-   `AdMob.requestTrackingAuthorization()` at a natural moment, not cold launch);
-   Google **UMP** consent for EEA/UK; update the privacy policy for AdMob +
-   RevenueCat; complete App Store **App Privacy** + Play **Data safety** forms.
+5. **Consent / privacy / store compliance.** We ship **non-personalized ads (no
+   ATT prompt)** — no `NSUserTrackingUsageDescription`, `npa:true` per request,
+   and a `PrivacyInfo.xcprivacy` with `NSPrivacyTracking=false`. EEA/UK still
+   needs a Google **UMP** consent message (not yet implemented) before monetizing
+   that traffic. Privacy policy updated for AdMob + RevenueCat + sign-in; complete
+   App Store **App Privacy** (email + user id + gameplay, Linked, NOT tracking) +
+   Play **Data safety** forms.
 6. **Responsive** — the 20 games were visually inspected at iPhone width (393px)
    and render cleanly; re-check the paywall / rewarded-ad surfaces once they're
    testable on device.
@@ -88,6 +107,6 @@ real apps (below).
 ## Product decisions baked in as config defaults (retune in `config.ts`)
 - Free-hint threshold **2** · interstitial **every 3rd transition AND ≤1/3 min**
   · premium = **remove ads + unlock archive**.
-- ⚠️ The live RevenueCat product is a **one-time lifetime unlock**, not the
-  subscription the original plan assumed — decide which you want before creating
-  the real store products.
+- The remove-ads purchase is a **one-time lifetime unlock** (non-consumable) —
+  confirmed with the user (2026-06-24), not a subscription.
+- Ads are **non-personalized, no ATT prompt** — confirmed 2026-06-24.
