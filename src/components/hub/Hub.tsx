@@ -32,6 +32,11 @@ export function Hub() {
   const todayResults = useMemo(() => results[today] ?? {}, [results, today]);
   const playedCount = Object.keys(todayResults).length;
   const streak = hydrated ? liveStreak(currentStreak, lastPlayedISO) : 0;
+  // A returning player (has played before) doesn't need the full marketing hero
+  // every day. Stays false until hydrated, so the static HTML/first paint keeps
+  // the full pitch (good for SEO + first-time visitors); it collapses to a
+  // compact header only once we know this person has played.
+  const isReturning = hydrated && lastPlayedISO != null;
 
   const avgSolve = useMemo(() => {
     const times = Object.values(todayResults)
@@ -77,22 +82,41 @@ export function Hub() {
 
   return (
     <>
-      {/* hero */}
-      <section className="mx-auto max-w-shell px-6 pt-28 sm:px-8">
+      {/* hero — full pitch for first-time visitors; compact for returning players */}
+      <section className={cn("mx-auto max-w-shell px-6 sm:px-8", isReturning ? "pt-24" : "pt-28")}>
         <div className="flex animate-rise flex-col items-center text-center">
           <div className="flex items-center gap-2.5 font-mono text-[11.5px] uppercase tracking-[0.26em] text-cyan-soft">
             <span className="h-1.5 w-1.5 animate-pulse2 rounded-full bg-cyan shadow-[0_0_8px_#00e5ff]" />
             <span>{dateLabel(today)}</span>
           </div>
-          <h1 className="mt-4 font-display text-[clamp(34px,5.4vw,68px)] font-semibold leading-none tracking-[-0.03em] text-ink">
-            Tap into your mind,
-            <br />
-            <span className="bt-gradient-text">one puzzle a day.</span>
-          </h1>
-          <p className="mt-5 max-w-[520px] text-[17px] leading-relaxed text-ink-soft">
-            {GAME_COUNT_WORD} science-backed brain games, one fresh challenge every day. Build a streak,
-            level up your cognition, and see your mind sharpen.
-          </p>
+          {isReturning ? (
+            <>
+              <h1 className="mt-3 font-display text-[clamp(26px,4.2vw,40px)] font-semibold leading-tight tracking-[-0.02em] text-ink">
+                Welcome back.
+              </h1>
+              <p className="mt-2 text-[15px] leading-relaxed text-ink-soft">
+                {streak > 0 ? (
+                  <>
+                    🔥 <span className="font-medium text-ink">{streak}-day streak</span> — keep it alive.
+                  </>
+                ) : (
+                  <>Today&apos;s puzzles are ready.</>
+                )}
+              </p>
+            </>
+          ) : (
+            <>
+              <h1 className="mt-4 font-display text-[clamp(34px,5.4vw,68px)] font-semibold leading-none tracking-[-0.03em] text-ink">
+                Tap into your mind,
+                <br />
+                <span className="bt-gradient-text">one puzzle a day.</span>
+              </h1>
+              <p className="mt-5 max-w-[520px] text-[17px] leading-relaxed text-ink-soft">
+                {GAME_COUNT_WORD} science-backed brain games, one fresh challenge every day. Build a streak,
+                level up your cognition, and see your mind sharpen.
+              </p>
+            </>
+          )}
         </div>
 
         {/* stat strip */}
