@@ -259,6 +259,12 @@ export function SpotChange({
     [phase, ended, round, results, totalRounds, reducedMotion, schedule, finish],
   );
 
+  // The armed deadline timer captures its closure once, but resolveRound guards
+  // on the live `phase` (it returns early unless phase==="test"). Keep a ref to
+  // the freshest resolveRound so the timeout miss actually fires.
+  const resolveRef = useRef(resolveRound);
+  resolveRef.current = resolveRound;
+
   // Begin a round: SHOW → (timer) → BLANK → (timer) → TEST → (deadline) → miss.
   const startRound = useCallback(() => {
     if (ended) return;
@@ -279,12 +285,12 @@ export function SpotChange({
         // Arm the per-round input deadline: no answer in time is a miss.
         inputTimerRef.current = setTimeout(() => {
           inputTimerRef.current = null;
-          resolveRound(null);
+          resolveRef.current(null);
         }, inputMs);
         timersRef.current.push(inputTimerRef.current);
       }, blank);
     }, flash);
-  }, [ended, flashMs, reducedMotion, schedule, inputMs, resolveRound]);
+  }, [ended, flashMs, reducedMotion, schedule, inputMs]);
 
   // Handle a tap/selection on a cell during the TEST phase.
   const pick = useCallback((cell: number) => resolveRound(cell), [resolveRound]);

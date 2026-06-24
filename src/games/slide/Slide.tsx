@@ -244,10 +244,12 @@ export function Slide({
         }
         const next = applyMove(cur, p, size);
         const startTimer = moves === 0;
-        if (startTimer) {
-          clock.start();
-          startedAtRef.current = Date.now(); // monotonic anchor for the win time
-        }
+        if (startTimer) clock.start();
+        // Anchor the monotonic win-time source on the first move of a fresh game
+        // OR the first move after resuming an in-progress save (it stays null
+        // until anchored). Without the resume case, a resumed solve records a
+        // frozen time that disagrees with the visible clock.
+        if (startedAtRef.current == null) startedAtRef.current = Date.now();
         setHistory((h) => [...h, cur]); // snapshot for Undo (engine is pure)
         setMoves((m) => m + 1);
         setFocus(p); // the blank moved to where the tile was; keep focus on a real tile

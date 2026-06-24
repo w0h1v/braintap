@@ -369,6 +369,10 @@ export function Forge({
   const onTouchStart = useCallback(
     (i: number) => {
       if (won) return;
+      // Clear any stale flag from a prior long-press whose trailing synthetic
+      // click was suppressed by the browser — otherwise it would swallow this
+      // touch's genuine tap.
+      longPressFired.current = false;
       const timer = window.setTimeout(() => {
         longPress.current = null;
         // Arm: confirm the long-press fired with a tap pulse, and flag it so the
