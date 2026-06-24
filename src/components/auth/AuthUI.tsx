@@ -133,6 +133,14 @@ export function GoogleMark() {
   );
 }
 
+export function AppleMark() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="currentColor">
+      <path d="M16.36 12.78c.02 2.4 2.1 3.2 2.13 3.21-.02.06-.33 1.15-1.1 2.27-.66.97-1.35 1.93-2.43 1.95-1.06.02-1.4-.63-2.62-.63-1.21 0-1.6.61-2.6.65-1.05.04-1.84-1.05-2.51-2.01-1.36-1.97-2.4-5.57-1-8 .69-1.21 1.93-1.97 3.27-1.99 1.03-.02 2 .69 2.62.69.63 0 1.8-.86 3.04-.73.52.02 1.97.21 2.9 1.58-.07.05-1.74 1.02-1.72 3.04M14.43 4.6c.55-.66.92-1.59.82-2.51-.79.03-1.75.53-2.31 1.19-.51.58-.95 1.52-.83 2.42.88.07 1.78-.45 2.32-1.1" />
+    </svg>
+  );
+}
+
 /**
  * Secondary escape hatch shown beneath the sign-in / sign-up forms: an account
  * is optional, so let people just go play. Progress saves locally; signing up

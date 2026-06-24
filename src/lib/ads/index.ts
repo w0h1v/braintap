@@ -53,9 +53,9 @@ function ensureInit(): Promise<void> {
   if (!initPromise) {
     initPromise = (async () => {
       const { AdMob } = await import("@capacitor-community/admob");
-      // `initializeForTesting` keeps us on test traffic; ATT (iOS) is requested
-      // later at a natural moment via AdMob.requestTrackingAuthorization(), not
-      // at cold launch (see runbook §7).
+      // `initializeForTesting` keeps us on test traffic; flip to false (and set
+      // real ad-unit ids) before submission. We serve NON-PERSONALIZED ads only
+      // (npa:true per request) and never call ATT, so no tracking prompt fires.
       await AdMob.initialize({ initializeForTesting: true });
     })();
   }
@@ -78,7 +78,7 @@ export async function showRewardedAd(): Promise<RewardOutcome> {
       rewarded = true;
     });
     try {
-      await AdMob.prepareRewardVideoAd({ adId: rewardedAdId() });
+      await AdMob.prepareRewardVideoAd({ adId: rewardedAdId(), npa: true });
       await AdMob.showRewardVideoAd();
     } finally {
       await handle.remove();
@@ -113,7 +113,7 @@ export async function maybeInterstitial(reason: "return-home"): Promise<void> {
   try {
     const { AdMob } = await import("@capacitor-community/admob");
     await ensureInit();
-    await AdMob.prepareInterstitial({ adId: interstitialAdId() });
+    await AdMob.prepareInterstitial({ adId: interstitialAdId(), npa: true });
     await AdMob.showInterstitial();
   } catch (e) {
     console.warn("[ads] interstitial failed", e);

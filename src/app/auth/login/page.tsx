@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 import { Button, GhostButton } from "@/components/ui/Button";
 import { useAuth } from "@/lib/auth";
 import {
+  AppleMark,
   AuthShell,
   ContinueAsGuest,
   Divider,
@@ -18,13 +19,14 @@ import {
 
 export default function LoginPage() {
   const router = useRouter();
-  const { enabled, loading, signInWithPassword, signInWithGoogle } = useAuth();
+  const { enabled, loading, signInWithPassword, signInWithGoogle, signInWithApple } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [appleBusy, setAppleBusy] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -55,6 +57,16 @@ export default function LoginPage() {
     if (err) {
       setError(err);
       setGoogleBusy(false);
+    }
+  }
+
+  async function onApple() {
+    setError(null);
+    setAppleBusy(true);
+    const { error: err } = await signInWithApple();
+    if (err) {
+      setError(err);
+      setAppleBusy(false);
     }
   }
 
@@ -100,6 +112,16 @@ export default function LoginPage() {
           <GhostButton type="button" onClick={onGoogle} disabled={googleBusy} className="w-full">
             <GoogleMark />
             {googleBusy ? "Redirecting…" : "Continue with Google"}
+          </GhostButton>
+
+          <GhostButton
+            type="button"
+            onClick={onApple}
+            disabled={appleBusy}
+            className="mt-3 w-full"
+          >
+            <AppleMark />
+            {appleBusy ? "Signing in…" : "Continue with Apple"}
           </GhostButton>
 
           <p className="mt-6 text-center text-sm text-ink-mute">

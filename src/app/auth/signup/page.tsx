@@ -9,6 +9,7 @@ import { Button, GhostButton } from "@/components/ui/Button";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import {
+  AppleMark,
   Field,
   ErrorBanner,
   Divider,
@@ -21,7 +22,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function SignupPage() {
   const router = useRouter();
-  const { enabled, loading, signUpWithPassword, signInWithGoogle } = useAuth();
+  const { enabled, loading, signUpWithPassword, signInWithGoogle, signInWithApple } = useAuth();
 
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
@@ -30,6 +31,7 @@ export default function SignupPage() {
   const [confirmation, setConfirmation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [appleBusy, setAppleBusy] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -72,6 +74,16 @@ export default function SignupPage() {
     if (err) {
       setError(err);
       setGoogleBusy(false);
+    }
+  }
+
+  async function onApple() {
+    setError(null);
+    setAppleBusy(true);
+    const { error: err } = await signInWithApple();
+    if (err) {
+      setError(err);
+      setAppleBusy(false);
     }
   }
 
@@ -150,6 +162,16 @@ export default function SignupPage() {
               >
                 <GoogleMark />
                 {googleBusy ? "Redirecting…" : "Continue with Google"}
+              </GhostButton>
+
+              <GhostButton
+                type="button"
+                onClick={onApple}
+                disabled={appleBusy}
+                className="mt-3 w-full"
+              >
+                <AppleMark />
+                {appleBusy ? "Signing in…" : "Continue with Apple"}
               </GhostButton>
 
               <p className="mt-6 text-center text-sm text-ink-mute">

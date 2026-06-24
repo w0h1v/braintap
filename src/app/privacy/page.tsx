@@ -77,6 +77,22 @@ const SECTIONS: { heading: string; body: React.ReactNode }[] = [
     ),
   },
   {
+    heading: "Mobile app: ads, purchases, and sign-in",
+    body: (
+      <>
+        Our mobile app shows ads through Google AdMob. We request{" "}
+        <strong>non-personalized ads only</strong> — they are not tailored using a
+        cross-app advertising profile, and the app does not ask to track you or use
+        Apple&apos;s Advertising Identifier for advertising. Optional in-app
+        purchases (such as removing ads) are processed by Apple and managed via
+        RevenueCat; we receive a purchase receipt and entitlement status, not your
+        payment details. If you choose Sign in with Apple or Google, that provider
+        authenticates you and shares your name and email according to your choices
+        — with Sign in with Apple you may hide your email.
+      </>
+    ),
+  },
+  {
     heading: "Your choices",
     body: (
       <>
@@ -128,7 +144,7 @@ export default function PrivacyPage() {
           Privacy Policy
         </h1>
         <p className="mt-4 font-mono text-[11px] tracking-[0.14em] text-ink-mute">
-          LAST UPDATED · JUNE 17, 2026
+          LAST UPDATED · JUNE 24, 2026
         </p>
       </header>
 
