@@ -43,6 +43,12 @@ interface ConnectionsState {
   remaining: string[];
   /** Indices (into puzzle.groups) of solved groups, in solve order. */
   solvedOrder: number[];
+  /**
+   * How many of `solvedOrder` the player genuinely earned (by submitting a
+   * correct guess or spending a hint). Any groups beyond this index were
+   * auto-revealed on a loss and must NOT read as celebratory solves.
+   */
+  earnedCount: number;
   /** Each guess recorded as group-index per word, for the emoji share grid. */
   history: number[][];
   mistakes: number;
@@ -56,17 +62,30 @@ function emojiFor(gi: number): string {
   return GROUP_EMOJI[gi] ?? "⬛";
 }
 
+/** Spoken word for an emoji colour, so screen readers get the share grid too. */
+const EMOJI_WORD = ["yellow", "green", "blue", "purple"] as const;
+function emojiWordFor(gi: number): string {
+  return EMOJI_WORD[gi] ?? "blank";
+}
+
+/** Roman-style ordinal label for the category's tier order (non-color cue). */
+const TIER_ORDINAL = ["1st", "2nd", "3rd", "4th"] as const;
+
 /**
  * Per-word font sizing. Tiles are fluid (a quarter of the board minus gaps), so
  * we shrink long words aggressively to guarantee they never overflow or overlap
  * their neighbours down to a 360px viewport.
  */
 function fontSizeFor(word: string): string {
+  // Floor raised to 9px so even the longest pool terms (17ch) stay legible on a
+  // 360px viewport. Tiles already wrap (overflow-wrap:anywhere) and clip-guard
+  // with overflow-hidden, so the larger floor wraps onto two lines rather than
+  // shrinking into sub-legible 6.5px text.
   const len = word.length;
-  if (len >= 15) return "clamp(6.5px, 1.9vw, 9.5px)";
-  if (len >= 13) return "clamp(7.5px, 2.2vw, 10.5px)";
-  if (len >= 11) return "clamp(8.5px, 2.6vw, 11.5px)";
-  if (len >= 9) return "clamp(9.5px, 2.9vw, 12.5px)";
+  if (len >= 15) return "clamp(9px, 2.4vw, 10.5px)";
+  if (len >= 13) return "clamp(9.5px, 2.6vw, 11px)";
+  if (len >= 11) return "clamp(10px, 2.8vw, 11.5px)";
+  if (len >= 9) return "clamp(10.5px, 3vw, 12.5px)";
   if (len >= 7) return "clamp(11px, 3.3vw, 13.5px)";
   return "clamp(12px, 3.6vw, 15px)";
 }
@@ -87,6 +106,14 @@ export function Connections({
   const [solvedOrder, setSolvedOrder] = useState<number[]>(
     () => saved?.solvedOrder ?? [],
   );
+  // How many entries of `solvedOrder` the player actually earned. On a resumed
+  // loss with no stored value, fall back to the count of genuinely-solved groups
+  // implied by the result (lost states reveal the rest), else trust the array.
+  const [earnedCount, setEarnedCount] = useState<number>(
+    () =>
+      saved?.earnedCount ??
+      (saved?.status === "lost" ? 0 : saved?.solvedOrder?.length ?? 0),
+  );
   const [history, setHistory] = useState<number[][]>(() => saved?.history ?? []);
   const [mistakes, setMistakes] = useState<number>(() => saved?.mistakes ?? 0);
   const [hintsUsed, setHintsUsed] = useState<number>(() => saved?.hintsUsed ?? 0);
@@ -102,6 +129,10 @@ export function Connections({
   const [shaking, setShaking] = useState<string[]>([]);
   const [justSolved, setJustSolved] = useState<number | null>(null);
   const [showModal, setShowModal] = useState(false);
+  /** True while a rewarded-ad hint is in flight — freezes the whole board. */
+  const [busy, setBusy] = useState(false);
+  /** Two-step confirmation state for the "Give up" affordance. */
+  const [confirmGiveUp, setConfirmGiveUp] = useState(false);
 
   const completedRef = useRef(false);
   const msgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -126,25 +157,42 @@ export function Connections({
   const lost = status === "lost";
   const flawless = won && mistakes === 0;
   const mistakesLeft = maxMistakes - mistakes;
+  /** Any interaction with tiles/actions is blocked when over OR mid-ad. */
+  const interactionLocked = gameOver || busy;
+  /** Submitting now would end the game on a wrong guess. */
+  const lastGuess = !gameOver && mistakesLeft === 1;
 
   // Persist resumable state.
   useEffect(() => {
     onPersistState?.({
       remaining,
       solvedOrder,
+      earnedCount,
       history,
       mistakes,
       hintsUsed,
       status,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remaining, solvedOrder, history, mistakes, hintsUsed, status]);
+  }, [remaining, solvedOrder, earnedCount, history, mistakes, hintsUsed, status]);
 
   // Clean up the message timer on unmount.
   useEffect(() => {
     return () => {
       if (msgTimer.current) clearTimeout(msgTimer.current);
     };
+  }, []);
+
+  // Resuming an already-finished puzzle: mark it complete (so onComplete-derived
+  // UI like the tier nav rehydrates) and auto-open the result modal, instead of
+  // leaving the player on a bare "View result" button with no context.
+  useEffect(() => {
+    if (saved && saved.status !== "playing" && !completedRef.current) {
+      completedRef.current = true;
+      setShowModal(true);
+    }
+    // Run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const flash = useCallback((text: string, tone: "info" | "error" = "info") => {
@@ -211,7 +259,7 @@ export function Connections({
 
   const toggle = useCallback(
     (word: string) => {
-      if (gameOver) return;
+      if (gameOver || busy) return;
       let changed = false;
       setSelected((prev) => {
         if (prev.includes(word)) {
@@ -227,11 +275,11 @@ export function Connections({
         haptics.tap();
       }
     },
-    [gameOver],
+    [gameOver, busy],
   );
 
   const submit = useCallback(() => {
-    if (gameOver || selected.length !== GROUP_SIZE) return;
+    if (gameOver || busy || selected.length !== GROUP_SIZE) return;
 
     const ev = evaluateGuess(puzzle, selected);
     const row = selected.map((w) => groupOf(puzzle, w));
@@ -245,6 +293,7 @@ export function Connections({
       const nextSolved = [...solvedOrder, gi];
       setRemaining(nextRemaining);
       setSolvedOrder(nextSolved);
+      setEarnedCount(nextSolved.length); // a genuinely earned group
       setSelected([]);
       setJustSolved(gi);
       haptics.success();
@@ -277,6 +326,7 @@ export function Connections({
         .map((_, i) => i)
         .filter((i) => !solvedOrder.includes(i));
       const finalSolved = [...solvedOrder, ...revealed];
+      setEarnedCount(solvedOrder.length); // lock in what was truly earned
       setSolvedOrder(finalSolved);
       setRemaining([]);
       setSelected([]);
@@ -284,6 +334,7 @@ export function Connections({
     }
   }, [
     gameOver,
+    busy,
     selected,
     puzzle,
     history,
@@ -299,7 +350,7 @@ export function Connections({
   ]);
 
   const shuffle = useCallback(() => {
-    if (gameOver) return;
+    if (gameOver || busy) return;
     setRemaining((prev) => {
       // Deterministic, UI-only visual reshuffle (does not touch puzzle data and
       // never uses Date.now / Math.random). A monotonic seed varies the order on
@@ -316,25 +367,75 @@ export function Connections({
     });
     sfx.tap();
     haptics.tap();
-  }, [gameOver]);
+  }, [gameOver, busy]);
 
   const deselect = useCallback(() => {
-    if (gameOver || selected.length === 0) return;
+    if (gameOver || busy || selected.length === 0) return;
     setSelected([]);
     sfx.tap();
     haptics.tap();
-  }, [gameOver, selected.length]);
+  }, [gameOver, busy, selected.length]);
+
+  /**
+   * Reset the board to a fresh attempt at the same puzzle. Used as the modal's
+   * "Play again" action so a finished player can retry without leaving.
+   */
+  const resetGame = useCallback(() => {
+    completedRef.current = false;
+    setRemaining(puzzle.tiles.slice());
+    setSolvedOrder([]);
+    setEarnedCount(0);
+    setHistory([]);
+    setMistakes(0);
+    setHintsUsed(0);
+    setStatus("playing");
+    setSelected([]);
+    setShaking([]);
+    setJustSolved(null);
+    setConfirmGiveUp(false);
+    setShowModal(false);
+    setMessage("");
+    shuffleSeed.current = 1;
+  }, [puzzle.tiles]);
+
+  /** Concede the puzzle: reveal the remaining groups and end as a loss. */
+  const giveUp = useCallback(() => {
+    if (gameOver || busy) return;
+    const revealed = puzzle.groups
+      .map((_, i) => i)
+      .filter((i) => !solvedOrder.includes(i));
+    const finalSolved = [...solvedOrder, ...revealed];
+    setEarnedCount(solvedOrder.length);
+    setSolvedOrder(finalSolved);
+    setRemaining([]);
+    setSelected([]);
+    setConfirmGiveUp(false);
+    finish(false, solvedOrder, history, mistakes, hintsUsed);
+  }, [gameOver, busy, puzzle, solvedOrder, history, mistakes, hintsUsed, finish]);
+
+  // Auto-dismiss the give-up confirmation if the player ignores it.
+  useEffect(() => {
+    if (!confirmGiveUp) return;
+    const t = setTimeout(() => setConfirmGiveUp(false), 4000);
+    return () => clearTimeout(t);
+  }, [confirmGiveUp]);
 
   const useHint = useCallback(async () => {
-    if (gameOver || hintsUsed >= MAX_HINTS) return;
+    if (gameOver || busy || hintsUsed >= MAX_HINTS) return;
     // MON-1: past the free threshold, a non-premium native user earns the hint
     // by watching a rewarded ad. Inert on web (adsAvailable() is false), so the
     // hint behaves exactly as before there. Ad fail → no hint, no penalty.
     if (adsAvailable() && !isPremium && hintsUsed >= getMonetizationConfig().freeHintThreshold) {
       if (adInFlightRef.current) return; // ignore taps while a rewarded ad is in flight
       adInFlightRef.current = true;
-      const r = await showRewardedAd();
-      adInFlightRef.current = false;
+      setBusy(true); // freeze the whole board, not just the hint button
+      let r: Awaited<ReturnType<typeof showRewardedAd>>;
+      try {
+        r = await showRewardedAd();
+      } finally {
+        adInFlightRef.current = false;
+        setBusy(false);
+      }
       if (r !== "rewarded") return;
     }
     const gi = getHint(puzzle, solvedOrder);
@@ -347,6 +448,7 @@ export function Connections({
 
     setRemaining(nextRemaining);
     setSolvedOrder(nextSolved);
+    setEarnedCount(nextSolved.length); // a hint-revealed group still "counts"
     setSelected((prev) => prev.filter((w) => !groupWords.has(w)));
     setHintsUsed(nextHints);
     setJustSolved(gi);
@@ -372,12 +474,13 @@ export function Connections({
     finish,
     flash,
     isPremium,
+    busy,
   ]);
 
   // Keyboard: Enter submits, Escape / Backspace deselects.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (gameOver) return;
+      if (gameOver || busy) return;
       if (e.key === "Enter" && selected.length === GROUP_SIZE) {
         submit();
         e.preventDefault();
@@ -388,7 +491,7 @@ export function Connections({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [gameOver, selected.length, submit, deselect]);
+  }, [gameOver, busy, selected.length, submit, deselect]);
 
   // Drop the solve-pop highlight once it has played.
   useEffect(() => {
@@ -419,7 +522,7 @@ export function Connections({
    */
   const onGridKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
-      if (gameOver || remaining.length === 0) return;
+      if (interactionLocked || remaining.length === 0) return;
       const n = remaining.length;
       const row = Math.floor(focusIndex / GRID_COLS);
       const col = focusIndex % GRID_COLS;
@@ -476,17 +579,18 @@ export function Connections({
           break;
       }
     },
-    [gameOver, remaining, focusIndex, selected.length, toggle, submit],
+    [interactionLocked, remaining, focusIndex, selected.length, toggle, submit],
   );
 
   const modalInsight = useMemo(() => {
     // On a win, highlight the hardest (last) category; on a loss, the most
     // recently revealed one.
+    const lastEarned = earnedCount > 0 ? solvedOrder[earnedCount - 1] : undefined;
     const target = won
       ? puzzle.groups[GROUP_COUNT - 1]
-      : puzzle.groups[solvedOrder[solvedOrder.length - 1]] ?? puzzle.groups[0];
+      : (lastEarned != null ? puzzle.groups[lastEarned] : undefined) ?? puzzle.groups[0];
     return `"${target.label}" — ${target.insight}`;
-  }, [won, puzzle.groups, solvedOrder]);
+  }, [won, puzzle.groups, solvedOrder, earnedCount]);
 
   const shareString = buildShare(won, history, mistakes);
 
@@ -523,33 +627,75 @@ export function Connections({
         {/* solved categories */}
         {solvedOrder.length > 0 && (
           <div className="mb-2 flex flex-col gap-2">
-            {solvedOrder.map((gi) => {
+            {solvedOrder.map((gi, order) => {
               const g = puzzle.groups[gi];
               const isFresh = gi === justSolved && !reducedMotion;
+              // Entries past the earned count were auto-revealed on a loss /
+              // give-up — render them muted and labelled so they never read as
+              // a celebratory solve the player earned.
+              const revealedNotSolved = order >= earnedCount;
+              const ordinal = TIER_ORDINAL[gi] ?? `${gi + 1}th`;
               return (
                 <div
                   key={g.label}
                   className={cn(
                     "rounded-xl px-3 py-2.5",
-                    isFresh && "animate-solve",
-                    !reducedMotion && !isFresh && "animate-pop",
+                    !revealedNotSolved && isFresh && "animate-solve",
+                    !reducedMotion && !revealedNotSolved && !isFresh && "animate-pop",
                   )}
-                  style={{
-                    background: g.color,
-                    boxShadow: isFresh
-                      ? `0 0 0 1px ${g.color}, 0 8px 26px ${g.color}55`
-                      : `0 4px 16px ${g.color}33`,
-                  }}
+                  aria-label={
+                    revealedNotSolved
+                      ? `Revealed (not solved): ${g.label}, ${ordinal} group. ${g.words.join(", ")}`
+                      : `Solved: ${g.label}, ${ordinal} group. ${g.words.join(", ")}`
+                  }
+                  style={
+                    revealedNotSolved
+                      ? {
+                          // Muted, desaturated treatment with a thin coloured edge so
+                          // the category is still identifiable but visibly "not earned".
+                          background: "rgba(255,255,255,0.05)",
+                          boxShadow: `inset 0 0 0 1px ${g.color}66`,
+                        }
+                      : {
+                          background: g.color,
+                          boxShadow: isFresh
+                            ? `0 0 0 1px ${g.color}, 0 8px 26px ${g.color}55`
+                            : `0 4px 16px ${g.color}33`,
+                        }
+                  }
                 >
                   <div
-                    className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em]"
-                    style={{ color: "rgba(4,6,15,0.68)" }}
+                    className="flex items-center gap-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em]"
+                    style={{ color: revealedNotSolved ? g.color : "rgba(4,6,15,0.68)" }}
                   >
-                    {g.label}
+                    <span
+                      className="rounded px-1 py-px text-[8.5px] tracking-[0.08em]"
+                      aria-hidden
+                      style={{
+                        background: revealedNotSolved ? "rgba(255,255,255,0.08)" : "rgba(4,6,15,0.16)",
+                        color: revealedNotSolved ? g.color : "rgba(4,6,15,0.7)",
+                      }}
+                    >
+                      {ordinal}
+                    </span>
+                    <span>{g.label}</span>
+                    {revealedNotSolved && (
+                      <span
+                        className="ml-auto text-[8.5px] font-normal lowercase tracking-[0.06em]"
+                        style={{ color: "rgba(226,234,255,0.5)" }}
+                        aria-hidden
+                      >
+                        revealed
+                      </span>
+                    )}
                   </div>
                   <div
                     className="mt-0.5 break-words font-display text-[14.5px] font-semibold leading-snug"
-                    style={{ color: "#04060f" }}
+                    style={{
+                      color: revealedNotSolved ? "rgba(226,234,255,0.62)" : "#04060f",
+                      textDecoration: revealedNotSolved ? "line-through" : undefined,
+                      textDecorationColor: revealedNotSolved ? `${g.color}99` : undefined,
+                    }}
                   >
                     {g.words.join(" · ")}
                   </div>
@@ -626,9 +772,21 @@ export function Connections({
           </div>
         )}
 
+        {/* last-guess warning: surface the stakes before the final allowed miss */}
+        {lastGuess && (
+          <div
+            className="mt-4 flex items-center justify-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em]"
+            style={{ color: "#ff9bbf" }}
+            role="status"
+          >
+            <span aria-hidden>⚠</span>
+            <span>Last guess — one mistake left</span>
+          </div>
+        )}
+
         {/* mistakes tracker */}
         {!won && (
-          <div className="mt-4 flex items-center justify-center gap-2.5">
+          <div className={cn("flex items-center justify-center gap-2.5", lastGuess ? "mt-2" : "mt-4")}>
             <span
               className="font-mono text-[11.5px]"
               style={{ color: "rgba(226,234,255,0.55)" }}
@@ -662,11 +820,13 @@ export function Connections({
 
         {/* actions */}
         {!gameOver && (
+          <>
           <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
             <button
               type="button"
               onClick={shuffle}
-              className="min-h-[44px] rounded-pill border border-white/20 px-5 py-2.5 font-display text-sm text-[#eaf1ff] transition-colors duration-150 hover:border-white/35 hover:bg-white/[0.07] active:scale-[0.97]"
+              disabled={busy}
+              className="min-h-[44px] rounded-pill border border-white/20 px-5 py-2.5 font-display text-sm text-[#eaf1ff] transition-colors duration-150 hover:border-white/35 hover:bg-white/[0.07] active:scale-[0.97] disabled:opacity-40"
               style={{ background: "rgba(255,255,255,0.04)" }}
             >
               Shuffle
@@ -674,7 +834,7 @@ export function Connections({
             <button
               type="button"
               onClick={deselect}
-              disabled={selected.length === 0}
+              disabled={busy || selected.length === 0}
               className="min-h-[44px] rounded-pill border border-white/20 px-5 py-2.5 font-display text-sm text-[#eaf1ff] transition-colors duration-150 hover:border-white/35 hover:bg-white/[0.07] active:scale-[0.97] disabled:opacity-40 disabled:hover:border-white/20 disabled:hover:bg-white/[0.04]"
               style={{ background: "rgba(255,255,255,0.04)" }}
             >
@@ -685,25 +845,31 @@ export function Connections({
               max={MAX_HINTS}
               onHint={useHint}
               accent={ACCENT}
-              disabled={gameOver}
+              disabled={interactionLocked}
             />
             <button
               type="button"
               onClick={submit}
-              disabled={!selectionFull}
+              disabled={!selectionFull || busy}
               aria-label={
-                selectionFull
-                  ? "Submit your group of four"
-                  : `Select ${GROUP_SIZE - selected.length} more to submit`
+                !selectionFull
+                  ? `Select ${GROUP_SIZE - selected.length} more to submit`
+                  : lastGuess
+                    ? "Submit your group of four — this is your last guess"
+                    : "Submit your group of four"
               }
               className="min-h-[44px] rounded-pill px-6 py-2.5 font-display text-sm font-semibold transition-all duration-200 active:scale-[0.97]"
               style={
                 selectionFull
                   ? {
                       color: "#04060f",
-                      backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`,
+                      backgroundImage: lastGuess
+                        ? "linear-gradient(118deg,#ff6b9d,#ff9bbf)"
+                        : `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`,
                       border: "1px solid transparent",
-                      boxShadow: `0 8px 26px ${ACCENT.solid}3a`,
+                      boxShadow: lastGuess
+                        ? "0 8px 26px rgba(255,107,157,0.35)"
+                        : `0 8px 26px ${ACCENT.solid}3a`,
                     }
                   : {
                       color: "rgba(226,234,255,0.4)",
@@ -713,9 +879,48 @@ export function Connections({
                     }
               }
             >
-              Submit{selected.length > 0 && !selectionFull ? ` · ${selected.length}/${GROUP_SIZE}` : ""}
+              {selectionFull && lastGuess
+                ? "Submit · last guess"
+                : `Submit${selected.length > 0 && !selectionFull ? ` · ${selected.length}/${GROUP_SIZE}` : ""}`}
             </button>
           </div>
+
+          {/* Give up: an explicit, two-step exit so a stuck player is never trapped. */}
+          <div className="mt-3 flex justify-center">
+            {confirmGiveUp ? (
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[11px] tracking-[0.06em]" style={{ color: "rgba(226,234,255,0.6)" }}>
+                  Reveal the answers?
+                </span>
+                <button
+                  type="button"
+                  onClick={giveUp}
+                  disabled={busy}
+                  className="min-h-[36px] rounded-pill px-4 py-1.5 font-display text-[13px] font-semibold text-[#04060f] transition-transform active:scale-[0.97] disabled:opacity-40"
+                  style={{ background: "#ff9bbf" }}
+                >
+                  Give up
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmGiveUp(false)}
+                  className="min-h-[36px] rounded-pill border border-white/20 px-4 py-1.5 font-display text-[13px] text-[#eaf1ff] transition-colors hover:bg-white/[0.07]"
+                >
+                  Keep playing
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmGiveUp(true)}
+                disabled={busy}
+                className="min-h-[36px] rounded-pill px-3 py-1.5 font-display text-[12.5px] text-ink-faint transition-colors hover:text-[#eaf1ff] disabled:opacity-40"
+              >
+                Give up
+              </button>
+            )}
+          </div>
+          </>
         )}
 
         {/* compact end-of-game banner (modal carries the full result) */}
@@ -742,19 +947,34 @@ export function Connections({
         won={won}
         eyebrow="PUZZLE COMPLETE"
         title={won ? (flawless ? "Flawless." : "Solved!") : "So close."}
-        statValue={`${solvedOrder.length}/${GROUP_COUNT}`}
+        statValue={`${earnedCount}/${GROUP_COUNT}`}
         statLabel="GROUPS FOUND"
         insight={modalInsight}
         share={shareString}
+        onReplay={resetGame}
+        replayLabel="Play again"
         extra={
           history.length > 0 ? (
-            <pre
-              className="mx-auto inline-block font-mono text-[18px] leading-[1.25]"
-              style={{ letterSpacing: "2px" }}
-              aria-hidden
-            >
-              {history.map((row) => row.map(emojiFor).join("")).join("\n")}
-            </pre>
+            <figure className="m-0">
+              <pre
+                className="mx-auto inline-block font-mono text-[18px] leading-[1.25]"
+                style={{ letterSpacing: "2px" }}
+                aria-hidden
+              >
+                {history.map((row) => row.map(emojiFor).join("")).join("\n")}
+              </pre>
+              {/* Text alternative so screen readers get the guess recap too. */}
+              <figcaption className="sr-only">
+                Guess history, {history.length} guess{history.length === 1 ? "" : "es"}:{" "}
+                {history
+                  .map(
+                    (row, r) =>
+                      `Guess ${r + 1}: ${row.map(emojiWordFor).join(", ")}`,
+                  )
+                  .join(". ")}
+                .
+              </figcaption>
+            </figure>
           ) : undefined
         }
       />

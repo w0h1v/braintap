@@ -55,7 +55,6 @@ export function Sprint({
   savedState,
   onPersistState,
   reducedMotion,
-  hostTimer = false,
 }: GameComponentProps<SprintPuzzle, SprintState>) {
   const saved = savedState ?? null;
   // A finished saved game starts back at idle so the player can replay.
@@ -86,6 +85,10 @@ export function Sprint({
 
   const [flash, setFlash] = useState(false);
   const [shake, setShake] = useState(false);
+  // Transient "over by N" amount, shown briefly after an overshoot is undone
+  // (the offending cell is reverted immediately, so the live sum never sits in
+  // the over state — this surfaces the feedback without a color-only cue).
+  const [overBy, setOverBy] = useState(0);
   const [focusIdx, setFocusIdx] = useState(0);
   const [showModal, setShowModal] = useState(false);
   // Cells freshly refilled after a match — drives a brief pop animation.
@@ -102,6 +105,12 @@ export function Sprint({
   const popId = useRef(0);
   const completedRef = useRef(false);
   const popTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // True between queuing a match/overshoot resolution and it landing — guards
+  // against rapid double-tap races firing queued side effects twice.
+  const resolvingRef = useRef(false);
+  // Tracks which seconds we've already played a countdown tick for, so the
+  // last-few-seconds urgency cue fires exactly once per second.
+  const lastTickSecRef = useRef<number | null>(null);
 
   // Keep the refill pointer ref in sync (used inside callbacks without re-binding).
   useEffect(() => {
@@ -118,7 +127,10 @@ export function Sprint({
 
   const selectedSum = useMemo(() => sumOf(grid, selected), [grid, selected]);
   const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
-  const overshoot = selectedSum > target;
+  // The live selection is kept under target (overshoot reverts the tapped cell
+  // immediately), so the over-state is surfaced transiently via `overBy`.
+  const overshoot = overBy > 0;
+  const goalReached = score >= goal;
   const timeLow = remainingSec <= 10 && phase === "playing";
   const timeFrac = Math.max(0, Math.min(1, remainingMs / DURATION_MS));
   // How close the current selection is to the target (0–1), for the sum meter.
@@ -152,8 +164,15 @@ export function Sprint({
         `Time! Final score ${finalScore} target${finalScore === 1 ? "" : "s"}.` +
           (won ? " Goal reached." : ` Need ${goal} to clear.`),
       );
-      haptics.win();
-      sfx.win();
+      if (won) {
+        haptics.win();
+        sfx.win();
+      } else {
+        // Distinct, lower-key end cue when the goal wasn't reached — don't
+        // reuse the victory fanfare on a loss.
+        haptics.error();
+        sfx.wrong();
+      }
       setTimeout(() => setShowModal(true), reducedMotion ? 0 : 260);
       onComplete({
         // The host unlocks the next tier only on "won"; clearing the tier goal
@@ -182,6 +201,13 @@ export function Sprint({
         setRemainingMs(0);
         finish(scoreRef.current);
       } else {
+        // Subtle once-per-second urgency tick over the final 3 seconds.
+        const sec = Math.ceil(left / 1000);
+        if (sec <= 3 && sec >= 1 && lastTickSecRef.current !== sec) {
+          lastTickSecRef.current = sec;
+          haptics.tap();
+          sfx.tap();
+        }
         setRemainingMs(left);
       }
     };
@@ -210,6 +236,8 @@ export function Sprint({
     scoreRef.current = 0;
     setRemainingMs(DURATION_MS);
     deadlineRef.current = Date.now() + DURATION_MS;
+    resolvingRef.current = false;
+    lastTickSecRef.current = null;
     setShowModal(false);
     setPopping(new Set());
     setScorePops([]);
@@ -232,16 +260,43 @@ export function Sprint({
     [puzzle.seed, puzzle.params],
   );
 
-  const clearOnOvershoot = useCallback(() => {
-    setSelected(new Set());
-    haptics.error();
-    sfx.wrong();
-    if (!reducedMotion) {
-      setShake(true);
-      setTimeout(() => setShake(false), 480);
-    }
-    setLiveStatus("Overshoot. Selection cleared.");
-  }, [reducedMotion]);
+  // Overshoot: revert ONLY the cell that pushed the sum over, leaving the rest
+  // of the (valid, under-target) selection intact. A soft "too high" nudge —
+  // not the punishing full-clear.
+  const undoOvershoot = useCallback(
+    (offendingIdx: number, amountOver: number) => {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(offendingIdx);
+        return next;
+      });
+      haptics.error();
+      sfx.wrong();
+      if (!reducedMotion) {
+        setShake(true);
+        setTimeout(() => setShake(false), 320);
+      }
+      // Surface the transient "over by N" cue, then clear it.
+      setOverBy(amountOver);
+      const tc = setTimeout(() => setOverBy(0), 900);
+      popTimers.current.push(tc);
+      setLiveStatus(`Too high by ${amountOver} — that cell was undone. Keep going.`);
+      resolvingRef.current = false;
+    },
+    [reducedMotion],
+  );
+
+  // Explicit, no-penalty clear of the current selection during play.
+  const clearSelection = useCallback(() => {
+    if (phase !== "playing") return;
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      haptics.tap();
+      sfx.tap();
+      setLiveStatus("Selection cleared.");
+      return new Set();
+    });
+  }, [phase]);
 
   const onMatch = useCallback(
     (sel: Set<number>) => {
@@ -284,6 +339,7 @@ export function Sprint({
         );
         popTimers.current.push(ts);
       }
+      resolvingRef.current = false;
     },
     [nextTarget, puzzle.refill, reducedMotion],
   );
@@ -291,16 +347,25 @@ export function Sprint({
   const toggleCell = useCallback(
     (i: number) => {
       if (phase !== "playing") return;
+      // Ignore taps while a match/overshoot is mid-resolution (double-tap race).
+      if (resolvingRef.current) return;
       setSelected((prev) => {
         const next = new Set(prev);
         if (next.has(i)) next.delete(i);
         else next.add(i);
         const sum = sumOf(grid, next);
         if (sum === target) {
-          // Defer mutation to the next microtask so state updates batch cleanly.
+          // Lock until the queued resolution lands, then defer the mutation to
+          // the next microtask so state updates batch cleanly.
+          resolvingRef.current = true;
           queueMicrotask(() => onMatch(next));
         } else if (sum > target) {
-          queueMicrotask(() => clearOnOvershoot());
+          // Only the just-tapped cell `i` caused the overshoot — undo just it.
+          const amountOver = sum - target;
+          resolvingRef.current = true;
+          queueMicrotask(() => undoOvershoot(i, amountOver));
+          // Render the pre-tap selection: keep the offending cell unselected.
+          next.delete(i);
         } else {
           haptics.tap();
           sfx.tap();
@@ -309,7 +374,7 @@ export function Sprint({
         return next;
       });
     },
-    [phase, grid, target, onMatch, clearOnOvershoot],
+    [phase, grid, target, onMatch, undoOvershoot],
   );
 
   // ---- keyboard --------------------------------------------------------------
@@ -359,38 +424,53 @@ export function Sprint({
           flashColor={ACCENT.solid}
           accentBorder
         />
-        {hostTimer ? (
-          <StatCard value={String(goal)} label="GOAL" color="#ffb020" />
-        ) : (
-          <StatCard
-            value={String(remainingSec)}
-            label="SECONDS"
-            color={timeLow ? "#ff8a4c" : "#ffb020"}
-            pulse={timeLow && !reducedMotion}
-            progress={phase === "playing" ? timeFrac : undefined}
-            progressColor={timeLow ? "#ff8a4c" : "#ffb020"}
-          />
-        )}
+        <StatCard
+          value={String(remainingSec)}
+          label="SECONDS"
+          color={timeLow ? "#ff8a4c" : "#ffb020"}
+          pulse={timeLow && !reducedMotion}
+          progress={phase === "playing" ? timeFrac : undefined}
+          progressColor={timeLow ? "#ff8a4c" : "#ffb020"}
+        />
+        {/* SCORE doubles as a goal tracker: the label shows the clear goal and
+            the value tints green once the goal is reached. */}
         <StatCard
           value={String(score)}
-          label="SCORE"
-          color="#00e5ff"
+          label={`SCORE · GOAL ${goal}`}
+          color={goalReached ? "#34d399" : "#00e5ff"}
+          progress={phase !== "idle" ? Math.min(1, score / goal) : undefined}
+          progressColor={goalReached ? "#34d399" : "#00e5ff"}
           scorePops={scorePops}
         />
       </div>
 
       {/* selection status + sum meter */}
       <div className="mt-4 flex w-full max-w-[420px] flex-col items-center gap-1.5">
-        <div className="font-mono text-[12px] text-[rgba(226,234,255,0.55)]">
-          Selected sum:{" "}
-          <span
-            className="font-semibold transition-colors duration-150"
-            style={{ color: overshoot ? "#ff8a4c" : ACCENT.solid }}
-          >
-            {selectedSum}
+        <div className="flex items-center gap-2 font-mono text-[12px] text-[rgba(226,234,255,0.55)]">
+          <span>
+            Selected sum:{" "}
+            <span
+              className={cn(
+                "font-semibold transition-colors duration-150",
+                // Non-color cue: strike through the sum on overshoot so the
+                // "too high" state reads without relying on hue.
+                overshoot && "line-through decoration-2",
+              )}
+              style={{ color: overshoot ? "#ff8a4c" : ACCENT.solid }}
+            >
+              {selectedSum}
+            </span>
+            {phase === "playing" && (
+              <span className="text-[rgba(226,234,255,0.35)]"> / {target}</span>
+            )}
           </span>
-          {phase === "playing" && (
-            <span className="text-[rgba(226,234,255,0.35)]"> / {target}</span>
+          {overshoot && (
+            <span
+              className="rounded-pill px-1.5 py-0.5 font-semibold uppercase tracking-[0.08em] text-[10px]"
+              style={{ background: "#ff8a4c", color: "#1a0a02" }}
+            >
+              ! over by {overBy}
+            </span>
           )}
         </div>
         {/* progress toward target */}
@@ -483,8 +563,8 @@ export function Sprint({
             <p className="mb-4 px-2 text-center font-display text-[13.5px] leading-relaxed text-[rgba(226,234,255,0.62)]">
               Tap cells that{" "}
               <span style={{ color: ACCENT.solid }}>add up to the target</span> before the{" "}
-              {DURATION_SEC}-second clock runs out. Overshoot and the selection clears — every
-              match refreshes the board.
+              {DURATION_SEC}-second clock runs out. Go too high and only that last tap is undone —
+              every match refreshes the board.
             </p>
           )}
           <button
@@ -504,9 +584,27 @@ export function Sprint({
           </button>
         </div>
       ) : (
-        <p className="mt-6 max-w-[332px] text-center font-mono text-[10.5px] tracking-[0.08em] text-ink-faint">
-          TAP CELLS THAT SUM TO THE TARGET · OVERSHOOT CLEARS
-        </p>
+        <div className="mt-6 flex w-full max-w-[332px] flex-col items-center gap-3">
+          <button
+            type="button"
+            onClick={clearSelection}
+            disabled={selected.size === 0}
+            className={cn(
+              "rounded-xl border px-5 py-2 font-display text-[13px] font-semibold",
+              !reducedMotion && "transition-[opacity,transform] duration-150 active:scale-95",
+              selected.size === 0
+                ? "cursor-default opacity-40"
+                : "opacity-100 hover:bg-white/[0.06]",
+            )}
+            style={{ borderColor: "rgba(255,255,255,0.16)", color: "#eaf1ff" }}
+            aria-label="Clear current selection — no penalty"
+          >
+            Clear selection
+          </button>
+          <p className="max-w-[332px] text-center font-mono text-[10.5px] tracking-[0.08em] text-ink-faint">
+            TAP CELLS THAT SUM TO THE TARGET · TOO HIGH UNDOES THE LAST TAP
+          </p>
+        </div>
       )}
 
       <CompletionModal
@@ -520,6 +618,11 @@ export function Sprint({
         insight={INSIGHT}
         share={buildShareText(finalScore)}
         won={isWin(finalScore, puzzle.params)}
+        onReplay={() => {
+          setShowModal(false);
+          start();
+        }}
+        replayLabel="Play again"
       />
     </div>
   );

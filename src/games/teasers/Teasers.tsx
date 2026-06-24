@@ -6,6 +6,7 @@ import { GAME_METAS } from "@/games/_meta";
 import { CompletionModal } from "@/components/play/CompletionModal";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
+import { useProgress } from "@/lib/progress";
 import { cn } from "@/lib/cn";
 import {
   scoreFromCorrect,
@@ -75,10 +76,15 @@ export function Teasers({
   // When replaying a finished day, start fresh from the top.
   const [index, setIndex] = useState<number>(() => initialState(saved, count).index);
   const [picks, setPicks] = useState<number[]>(() => initialState(saved, count).picks);
+  // Provisional selection before it's locked in (select-then-confirm). -1 = none.
+  const [pending, setPending] = useState<number>(-1);
   const [done, setDone] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [shake, setShake] = useState(false);
   const completedRef = useRef(false);
+  // Guards advance() against a rapid second key/tap firing before the index
+  // (and `answered`) settle, which could otherwise skip the next riddle.
+  const advanceLock = useRef(false);
 
   const total = puzzle.riddles.length;
   const riddle = puzzle.riddles[Math.min(index, total - 1)];
@@ -108,12 +114,21 @@ export function Teasers({
     if (mountedKey.current === puzzleKey) return;
     mountedKey.current = puzzleKey;
     completedRef.current = false;
+    advanceLock.current = false;
     setIndex(0);
     setPicks(emptyPicks(puzzle.riddles.length));
+    setPending(-1);
     setDone(false);
     setShowModal(false);
     setShake(false);
   }, [puzzleKey, puzzle.riddles.length]);
+
+  // Reset the provisional selection and clear the advance guard whenever the
+  // active riddle changes, so a fresh riddle starts unselected and re-tappable.
+  useEffect(() => {
+    setPending(-1);
+    advanceLock.current = false;
+  }, [index]);
 
   // Persist resumable state (JSON-serialisable).
   useEffect(() => {
@@ -121,9 +136,11 @@ export function Teasers({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index, picks, done]);
 
-  const answer = useCallback(
+  // Commit the pending selection: this is the irreversible scoring step that
+  // reveals the aha and plays correct/wrong feedback.
+  const commit = useCallback(
     (choice: number) => {
-      if (done || index >= total || picks[index] !== -1) return;
+      if (done || index >= total || picks[index] !== -1 || choice < 0) return;
       const right = choice === puzzle.riddles[index].answerIndex;
       setPicks((prev) => {
         const next = prev.slice();
@@ -145,12 +162,52 @@ export function Teasers({
     [done, index, total, picks, puzzle.riddles, reducedMotion],
   );
 
+  // Select a choice: first tap provisionally selects it (re-tappable, so a
+  // mis-tap can be corrected); tapping the same option again locks it in.
+  const select = useCallback(
+    (choice: number) => {
+      if (done || index >= total || picks[index] !== -1) return;
+      if (pending === choice) {
+        commit(choice);
+        return;
+      }
+      setPending(choice);
+      haptics.tap();
+      sfx.tap();
+    },
+    [done, index, total, picks, pending, commit],
+  );
+
+  // A run "passes" at >=60% accuracy (the same threshold that earns 2 stars).
+  // Below that we still let the player advance, but the completion screen is
+  // muted (no confetti, no win fanfare) so a 0/N run never reads as a triumph.
+  const passed = total > 0 && correctCount / total >= 0.6;
+
+  // All-time best accuracy for Tap Teasers, for a personal chase on the modal.
+  // The stored normalised score IS accuracy% here (correct/total*100), so the
+  // max score across history is the best accuracy. We fold in this run too.
+  const results = useProgress((s) => s.results);
+  const bestAccuracy = useMemo(() => {
+    let best = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+    for (const day of Object.values(results)) {
+      const r = day?.teasers;
+      if (r && typeof r.score === "number") best = Math.max(best, r.score);
+    }
+    return best;
+  }, [results, correctCount, total]);
+
   const finish = useCallback(() => {
     if (completedRef.current) return;
     completedRef.current = true;
     setDone(true);
-    haptics.win();
-    sfx.win();
+    // Celebrate only a genuine pass; otherwise give the gentler error cue.
+    if (passed) {
+      haptics.win();
+      sfx.win();
+    } else {
+      haptics.error();
+      sfx.wrong();
+    }
     const score = scoreFromCorrect(correctCount, total);
     // Completing all of the day's riddles counts as a win (and unlocks the next
     // tier on the host). Stars still reward accuracy.
@@ -168,10 +225,31 @@ export function Teasers({
       shareText: `BrainTap · Tap Teasers\n${correctCount}/${total} riddles cracked\n${emoji}\nbraintap.app`,
       detail: { correct: correctCount },
     });
-  }, [correctCount, total, puzzle.riddles, picks, onComplete, reducedMotion]);
+  }, [correctCount, total, puzzle.riddles, picks, onComplete, reducedMotion, passed]);
+
+  // Replay the same tier from a clean slate (wired to the modal's "Play again").
+  const replay = useCallback(() => {
+    completedRef.current = false;
+    advanceLock.current = false;
+    setIndex(0);
+    setPicks(emptyPicks(total));
+    setPending(-1);
+    setDone(false);
+    setShowModal(false);
+    setShake(false);
+  }, [total]);
 
   const advance = useCallback(() => {
-    if (!answered) return;
+    // First press confirms a pending (provisional) selection — this is the
+    // explicit lock-in step that scores the riddle and reveals the aha.
+    if (!answered) {
+      if (pending !== -1) commit(pending);
+      return;
+    }
+    // Already answered: guard against a rapid second key/tap firing before the
+    // index settles and skipping the next riddle.
+    if (advanceLock.current) return;
+    advanceLock.current = true;
     haptics.tap();
     sfx.tap();
     if (isLast) {
@@ -179,29 +257,33 @@ export function Teasers({
     } else {
       setIndex((i) => i + 1);
     }
-  }, [answered, isLast, finish]);
+  }, [answered, pending, commit, isLast, finish]);
 
-  // Keyboard: 1–4 / A–D to answer, Enter/Space to advance.
+  // Keyboard: 1–4 / A–D to select, Enter/Space to lock in / advance.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (done) return;
+      if (e.key === "Enter" || e.key === " ") {
+        // Confirms a pending pick when unanswered, or advances when answered;
+        // advance() re-checks `answered`, so a stale closure can't skip ahead.
+        advance();
+        e.preventDefault();
+        return;
+      }
       if (!answered) {
         const k = e.key.toLowerCase();
         const numMap: Record<string, number> = { "1": 0, "2": 1, "3": 2, "4": 3 };
         const letMap: Record<string, number> = { a: 0, b: 1, c: 2, d: 3 };
         const choice = k in numMap ? numMap[k] : k in letMap ? letMap[k] : -1;
         if (choice !== -1 && choice < riddle.choices.length) {
-          answer(choice);
+          select(choice);
           e.preventDefault();
         }
-      } else if (e.key === "Enter" || e.key === " ") {
-        advance();
-        e.preventDefault();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [done, answered, answer, advance, riddle.choices.length]);
+  }, [done, answered, select, advance, riddle.choices.length]);
 
   const optionLetter = (i: number) => String.fromCharCode(65 + i);
   const safeIndex = Math.min(index, total - 1);
@@ -299,7 +381,8 @@ export function Teasers({
         <span className="sr-only">{progressPct}% complete</span>
       </div>
 
-      {/* Riddle card */}
+      {/* Riddle card (active play) */}
+      {!done && (
       <div
         key={safeIndex}
         className={cn(
@@ -344,6 +427,7 @@ export function Teasers({
           {riddle.choices.map((choice, i) => {
             const isThisCorrect = i === riddle.answerIndex;
             const isPicked = selectedIdx === i;
+            const isPending = !answered && pending === i;
 
             let bg = "rgba(255,255,255,0.045)";
             let border = "rgba(255,255,255,0.1)";
@@ -362,6 +446,11 @@ export function Teasers({
               } else {
                 opacity = 0.5;
               }
+            } else if (isPending) {
+              // Provisional highlight — selected but not yet locked in.
+              bg = `${ACCENT.solid}1f`;
+              border = ACCENT.solid;
+              color = "#f3f7ff";
             }
 
             // Reveal the correct answer with a gentle pulse.
@@ -374,17 +463,19 @@ export function Teasers({
                 key={i}
                 type="button"
                 role="radio"
-                aria-checked={isPicked}
+                aria-checked={answered ? isPicked : isPending}
                 aria-label={`Option ${optionLetter(i)}: ${choice}${
                   answered && isThisCorrect ? " (correct)" : ""
-                }${answered && isPicked && !isThisCorrect ? " (your pick, incorrect)" : ""}`}
+                }${answered && isPicked && !isThisCorrect ? " (your pick, incorrect)" : ""}${
+                  isPending ? " (selected — press the button below to lock in)" : ""
+                }`}
                 disabled={answered}
-                onClick={() => answer(i)}
+                onClick={() => select(i)}
                 className={cn(
                   "flex min-h-[52px] w-full items-center gap-3 rounded-xl border px-4 py-3 text-left font-display text-[15px] font-medium transition-all duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 active:scale-[0.99]",
                   answered ? "cursor-default" : "cursor-pointer",
                   pulse && "animate-solve",
-                  !answered && !reducedMotion && "animate-rise",
+                  !answered && !isPending && !reducedMotion && "animate-rise",
                 )}
                 style={
                   {
@@ -397,12 +488,12 @@ export function Teasers({
                   } as CSSProperties
                 }
                 onMouseEnter={(e) => {
-                  if (answered) return;
+                  if (answered || isPending) return;
                   e.currentTarget.style.borderColor = `${ACCENT.solid}73`;
                   e.currentTarget.style.background = `${ACCENT.solid}0f`;
                 }}
                 onMouseLeave={(e) => {
-                  if (answered) return;
+                  if (answered || isPending) return;
                   e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
                   e.currentTarget.style.background = "rgba(255,255,255,0.045)";
                 }}
@@ -462,6 +553,23 @@ export function Teasers({
           </div>
         )}
 
+        {/* Lock-in (confirm) button — shown once a choice is provisionally
+            selected but not yet committed, so a mis-tap can be corrected first. */}
+        {!answered && pending !== -1 && (
+          <button
+            type="button"
+            onClick={() => commit(pending)}
+            className="relative mt-[14px] min-h-[48px] w-full rounded-xl py-3.5 font-display text-[14px] font-semibold text-[#04060f] transition-all active:scale-[0.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            style={{
+              backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`,
+              boxShadow: `0 10px 30px ${ACCENT.solid}38`,
+              outlineColor: ACCENT.solid,
+            }}
+          >
+            Lock in {optionLetter(pending)} →
+          </button>
+        )}
+
         {/* Advance button */}
         {answered && (
           <button
@@ -481,24 +589,118 @@ export function Teasers({
           </button>
         )}
 
-        {/* Keyboard hint (desktop, before answering) */}
+        {/* Hint (before locking in): how to select / confirm */}
         {!answered && (
-          <p className="relative mt-4 text-center font-mono text-[10px] tracking-[0.1em] text-ink-faint max-sm:hidden">
-            TAP A CHOICE · OR PRESS A–D / 1–4
+          <p className="relative mt-4 text-center font-mono text-[10px] tracking-[0.1em] text-ink-faint">
+            {pending === -1 ? (
+              <>
+                <span className="max-sm:hidden">TAP A CHOICE · OR PRESS A–D / 1–4</span>
+                <span className="sm:hidden">TAP A CHOICE TO SELECT</span>
+              </>
+            ) : (
+              <>
+                <span className="max-sm:hidden">TAP AGAIN OR PRESS ENTER TO LOCK IN</span>
+                <span className="sm:hidden">TAP LOCK IN TO CONFIRM</span>
+              </>
+            )}
           </p>
         )}
       </div>
+      )}
+
+      {/* Read-only review (after completion): every riddle with your pick, the
+          correct answer, and the aha — the payoff that used to evaporate on
+          finish. Stays visible behind the modal and after it's dismissed. */}
+      {done && (
+        <div className="mt-5 flex w-full flex-col gap-3" style={{ maxWidth: SURFACE }}>
+          <div className="flex items-center justify-between">
+            <span
+              className="font-mono text-[10.5px] tracking-[0.16em]"
+              style={{ color: ACCENT.soft }}
+            >
+              REVIEW · {correctCount}/{total} CRACKED
+            </span>
+            {!showModal && (
+              <button
+                type="button"
+                onClick={() => setShowModal(true)}
+                className="font-mono text-[10px] tracking-[0.12em] underline decoration-dotted underline-offset-2"
+                style={{ color: ACCENT.soft }}
+              >
+                RESULTS
+              </button>
+            )}
+          </div>
+          {puzzle.riddles.map((r, i) => {
+            const pick = picks[i];
+            const right = pick === r.answerIndex;
+            return (
+              <div
+                key={i}
+                className="rounded-[18px] border p-4 sm:p-5"
+                style={{
+                  background:
+                    "linear-gradient(180deg, rgba(20,12,30,0.6), rgba(8,12,26,0.5))",
+                  borderColor: right ? "rgba(124,245,196,0.28)" : `${ACCENT.solid}2e`,
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <span
+                    className="font-mono text-[10px] tracking-[0.16em]"
+                    style={{ color: ACCENT.soft }}
+                  >
+                    RIDDLE {i + 1}
+                  </span>
+                  <span
+                    className="shrink-0 font-mono text-[10px] tracking-[0.1em]"
+                    style={{ color: right ? CORRECT : WRONG }}
+                  >
+                    {right ? "✓ CORRECT" : "✗ MISSED"}
+                  </span>
+                </div>
+                <p className="mt-2 font-display text-[15px] font-semibold leading-[1.4] text-[#f3f7ff] [overflow-wrap:anywhere]">
+                  {r.question}
+                </p>
+                <div className="mt-2.5 flex flex-col gap-1 text-[12.5px] leading-[1.5]">
+                  {!right && pick !== -1 && (
+                    <p style={{ color: "#ffd0da" }} className="[overflow-wrap:anywhere]">
+                      Your pick: {optionLetter(pick)}. {r.choices[pick]}
+                    </p>
+                  )}
+                  <p style={{ color: CORRECT }} className="[overflow-wrap:anywhere]">
+                    Answer: {optionLetter(r.answerIndex)}. {r.choices[r.answerIndex]}
+                  </p>
+                </div>
+                <p className="mt-2 text-[12.5px] leading-[1.55] text-[rgba(226,234,255,0.78)] [overflow-wrap:anywhere]">
+                  <span className="font-mono text-[10px] tracking-[0.12em]" style={{ color: "#9fe9ff" }}>
+                    💡 AHA{" "}
+                  </span>
+                  {r.aha}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <CompletionModal
         open={showModal}
         onClose={() => setShowModal(false)}
         accent={ACCENT}
         eyebrow="RIDDLES COMPLETE"
-        won
+        won={passed}
         title={verdict(correctCount, total)}
         statValue={`${correctCount}/${total}`}
         statLabel="RIDDLES CRACKED"
         insight={INSIGHT}
+        onReplay={replay}
+        replayLabel="Play this set again"
+        extra={
+          <span className="font-mono text-[11px] tracking-[0.08em] text-ink-faint">
+            ALL-TIME BEST{" "}
+            <span className="tabular-nums text-ink">{bestAccuracy}%</span> ACCURACY
+          </span>
+        }
         share={`BrainTap · Tap Teasers\n${correctCount}/${total} riddles cracked\n${puzzle.riddles
           .map((r, i) => (picks[i] === r.answerIndex ? "🟩" : "🟥"))
           .join("")}\nbraintap.app`}

@@ -82,7 +82,13 @@ export function Sudoku({
   onPersistState,
   reducedMotion = false,
   hostTimer = false,
+  difficulty,
 }: GameComponentProps<SudokuPuzzle, SudokuState>) {
+  // MECH: the user-facing tier is the one the player picked (host-provided),
+  // not the engine's post-removal clue-count classification, which can disagree
+  // with the selected tier. Fall back to the puzzle's own label when no tier was
+  // passed (e.g. tier-less daily entry points).
+  const tier = difficulty ?? puzzle.difficulty;
   const saved = savedState ?? null;
   const { isPremium } = useEntitlement();
   const [entries, setEntries] = useState<number[]>(
@@ -102,6 +108,13 @@ export function Sudoku({
   );
   const [revealCell, setRevealCell] = useState<number | null>(null);
   const [shake, setShake] = useState(false);
+  // WIN: when the board is completely filled but doesn't match the solution we
+  // surface a persistent banner + mark the offending cells (instead of relying
+  // on a one-shot 500ms shake). Cleared the moment the player edits anything.
+  const [wrongCells, setWrongCells] = useState<Set<number>>(() => new Set());
+  // GIVE-UP: when the player reveals the solution, the board fills read-only so
+  // they can review the answer rather than abandoning a stuck puzzle.
+  const [gaveUp, setGaveUp] = useState(false);
   // Cells briefly flashing after their row/column/box was completed (VIS-1).
   const [flashCells, setFlashCells] = useState<Set<number>>(() => new Set());
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -144,6 +157,7 @@ export function Sudoku({
     setHintsUsed(snap.hintsUsed);
     setHintCells(new Set(snap.hintCells));
     setSelected(snap.selected);
+    setWrongCells(new Set());
   }, []);
 
   const undo = useCallback(() => {
@@ -179,12 +193,18 @@ export function Sudoku({
   const peers = useMemo(() => (selected == null ? new Set<number>() : peersOf(selected)), [selected]);
   const selectedValue = selected != null ? grid[selected] : 0;
 
-  // Count of each digit already placed — disables fully-used numpad keys.
+  // Count of each digit placed *without conflict* — drives the numpad's
+  // "all placed" badge. We deliberately ignore conflicting placements so a
+  // digit is never disabled while it's still wrong somewhere (CTRL): a player
+  // who erases a bad placement can always re-enter the digit without hunting.
   const digitCounts = useMemo(() => {
     const counts = new Array(7).fill(0) as number[];
-    for (const v of grid) if (v >= 1 && v <= 6) counts[v] += 1;
+    for (let i = 0; i < CELLS; i++) {
+      const v = grid[i];
+      if (v >= 1 && v <= 6 && !conflicts[i]) counts[v] += 1;
+    }
     return counts;
-  }, [grid]);
+  }, [grid, conflicts]);
 
   // Persist resumable state.
   useEffect(() => {
@@ -224,19 +244,28 @@ export function Sudoku({
       mistakes: mistakesRef.current,
       stars,
       shareText: shareLine(timeMs),
-      detail: { difficulty: puzzle.difficulty, hintsUsed },
+      detail: { difficulty: tier, hintsUsed },
     });
-  }, [clock, onComplete, puzzle.difficulty, reducedMotion, hintsUsed]);
+  }, [clock, onComplete, tier, reducedMotion, hintsUsed]);
 
   const tryComplete = useCallback(
     (g: number[]) => {
       if (g.every((v) => v !== 0)) {
         if (isSolved(g, puzzle.solution)) {
+          setWrongCells(new Set());
           finish();
         } else {
           mistakesRef.current += 1;
           haptics.error();
           sfx.wrong();
+          // Persist which filled cells differ from the solution so the player
+          // has a steady, reviewable cue (not just a one-shot shake). Conflicts
+          // already show their own ring; here we surface the silent-wrong cells.
+          const wrong = new Set<number>();
+          for (let i = 0; i < CELLS; i++) {
+            if (!puzzle.given[i] && g[i] !== puzzle.solution[i]) wrong.add(i);
+          }
+          setWrongCells(wrong);
           if (!reducedMotion) {
             setShake(true);
             setTimeout(() => setShake(false), 500);
@@ -244,7 +273,7 @@ export function Sudoku({
         }
       }
     },
-    [finish, puzzle.solution, reducedMotion],
+    [finish, puzzle.solution, puzzle.given, reducedMotion],
   );
 
   // Briefly flash a just-completed row/column/box in the game accent (VIS-1).
@@ -269,6 +298,8 @@ export function Sudoku({
     (n: number) => {
       if (won || selected == null || puzzle.given[selected]) return;
       pushHistory();
+      // Any edit invalidates a stale "full but wrong" verdict.
+      setWrongCells(new Set());
       if (notesMode) {
         setNotes((prev) => {
           const next = prev.slice();
@@ -313,6 +344,7 @@ export function Sudoku({
     // Nothing to erase → don't record a no-op on the undo stack.
     if (entries[selected] === 0 && notes[selected].size === 0) return;
     pushHistory();
+    setWrongCells(new Set());
     setEntries((prev) => {
       const next = prev.slice();
       next[selected] = 0;
@@ -376,6 +408,60 @@ export function Sudoku({
     });
   }, [won, hintsUsed, grid, puzzle, reducedMotion, tryComplete, pushHistory, flashUnits, isPremium]);
 
+  // GIVE-UP: fill the whole board from the solution, read-only, so a stuck
+  // player can review the answer and leave satisfied. Records a "lost" result
+  // (no score) — distinct from a genuine solve.
+  const revealSolution = useCallback(() => {
+    if (won || gaveUp) return;
+    if (!confirm("Reveal the full solution? This ends the puzzle without a win.")) return;
+    clock.stop();
+    finalMsRef.current = clock.ms;
+    setGaveUp(true);
+    setWon(true);
+    setWrongCells(new Set());
+    setSelected(null);
+    setEntries(() => {
+      const next = new Array(CELLS).fill(0);
+      for (let i = 0; i < CELLS; i++) if (!puzzle.given[i]) next[i] = puzzle.solution[i];
+      return next;
+    });
+    setNotes(Array.from({ length: CELLS }, () => new Set<number>()));
+    sfx.tap();
+    haptics.tap();
+    const revealMs = reducedMotion ? 120 : 500;
+    setTimeout(() => setShowModal(true), revealMs);
+    onComplete({
+      status: "lost",
+      score: 0,
+      timeMs: clock.ms,
+      mistakes: mistakesRef.current,
+      stars: 0,
+      detail: { difficulty: tier, hintsUsed, revealed: true },
+    });
+  }, [won, gaveUp, clock, puzzle.given, puzzle.solution, reducedMotion, onComplete, tier, hintsUsed]);
+
+  // Replay the same puzzle from scratch (session-only reset; the host keeps the
+  // tier). Wired into the CompletionModal's "Play again" action.
+  const reset = useCallback(() => {
+    setEntries(new Array(CELLS).fill(0));
+    setNotes(Array.from({ length: CELLS }, () => new Set<number>()));
+    setSelected(null);
+    setNotesMode(false);
+    setWon(false);
+    setGaveUp(false);
+    setHintsUsed(0);
+    setHintCells(new Set());
+    setWrongCells(new Set());
+    setUndoStack([]);
+    setRedoStack([]);
+    setShowModal(false);
+    setSolving(false);
+    mistakesRef.current = 0;
+    finalMsRef.current = 0;
+    clock.reset();
+    clock.start();
+  }, [clock]);
+
   const move = useCallback((dr: number, dc: number) => {
     setSelected((cur) => {
       const c = cur ?? 0;
@@ -422,11 +508,15 @@ export function Sudoku({
   }, [won, inputDigit, erase, move, undo, redo]);
 
   // Status text for screen readers.
-  const status = won
-    ? "Puzzle solved."
-    : conflictCount > 0
-      ? `${conflictCount} cell${conflictCount === 1 ? "" : "s"} conflict.`
-      : `${filledCount} of ${CELLS} cells filled.`;
+  const status = gaveUp
+    ? "Solution revealed."
+    : won
+      ? "Puzzle solved."
+      : wrongCells.size > 0
+        ? "Board is full but not yet correct — check the highlighted cells."
+        : conflictCount > 0
+          ? `${conflictCount} cell${conflictCount === 1 ? "" : "s"} conflict.`
+          : `${filledCount} of ${CELLS} cells filled.`;
 
   return (
     <div className="flex w-full flex-col items-center">
@@ -450,7 +540,7 @@ export function Sudoku({
             background: `${ACCENT.solid}14`,
           }}
         >
-          {puzzle.difficulty.toUpperCase()}
+          {tier.toUpperCase()}
         </span>
         <span className="tabular-nums tracking-[0.12em]" style={{ color: ACCENT.soft }}>
           {filledCount}/{CELLS}
@@ -480,6 +570,22 @@ export function Sudoku({
         />
       </div>
 
+      {/* WIN: persistent banner for a full-but-incorrect board (stays until the
+          next edit), so the state isn't conveyed by a single 500ms shake. */}
+      {wrongCells.size > 0 && !won && (
+        <div
+          className="mb-3 w-full rounded-xl border px-3.5 py-2.5 text-center font-display text-[12.5px] leading-snug"
+          style={{
+            maxWidth: "min(92vw, 380px)",
+            color: CONFLICT,
+            borderColor: `${CONFLICT}59`,
+            background: `${CONFLICT}1a`,
+          }}
+        >
+          Board is full but not yet correct — check the highlighted cells.
+        </div>
+      )}
+
       <div
         className={cn(
           "grid aspect-square w-full grid-cols-6 overflow-hidden rounded-2xl border-2",
@@ -506,6 +612,7 @@ export function Sudoku({
           const cellNotes = notes[i];
           const isHint = hintCells.has(i);
           const isFlash = flashCells.has(i);
+          const isWrong = wrongCells.has(i);
 
           let bg = `${ACCENT.solid}12`;
           if (isSel) bg = `${ACCENT.solid}4d`;
@@ -513,9 +620,11 @@ export function Sudoku({
           else if (isPeer) bg = `${ACCENT.solid}20`;
           if (isHint && !isSel) bg = "rgba(0,229,255,0.16)";
           if (conflict) bg = "rgba(255,107,157,0.18)";
+          if (isWrong && !conflict) bg = "rgba(255,107,157,0.14)";
           if (isFlash) bg = `${ACCENT.solid}40`;
 
-          const color = conflict ? CONFLICT : isHint ? SAME : given ? ACCENT.soft : "#eafcff";
+          const color =
+            conflict || isWrong ? CONFLICT : isHint ? SAME : given ? ACCENT.soft : "#eafcff";
 
           // Stagger the solve reveal across the grid (diagonal sweep).
           const revealDelay = solving && !reducedMotion ? (r + c) * 28 : 0;
@@ -525,7 +634,7 @@ export function Sudoku({
               key={i}
               type="button"
               role="gridcell"
-              aria-label={`Row ${r + 1} column ${c + 1}${value ? `, ${value}` : ", empty"}${given ? ", clue" : ""}${isHint ? ", revealed by hint" : ""}${conflict ? ", conflict" : ""}`}
+              aria-label={`Row ${r + 1} column ${c + 1}${value ? `, ${value}` : ", empty"}${given ? ", clue" : ""}${isHint ? ", revealed by hint" : ""}${conflict ? ", conflict" : ""}${isWrong && !conflict ? ", incorrect" : ""}`}
               aria-selected={isSel}
               disabled={won}
               onClick={() => {
@@ -561,6 +670,12 @@ export function Sudoku({
                   : isFlash
                     ? `inset 0 0 0 2px ${ACCENT.solid}, 0 0 18px -4px ${ACCENT.solid}`
                     : undefined,
+                // ACC: wrong-but-not-conflicting cells get a *dashed* inset
+                // outline — a shape cue distinct from the solid conflict ring,
+                // so the error state doesn't rely on colour alone.
+                ...(isWrong && !conflict && !isSel
+                  ? { outline: `2px dashed ${CONFLICT}`, outlineOffset: "-3px" }
+                  : null),
                 borderRight:
                   c === N - 1
                     ? "none"
@@ -571,6 +686,16 @@ export function Sudoku({
                     : `${r % 2 === 1 ? 2 : 1}px solid ${r % 2 === 1 ? `${ACCENT.solid}59` : "rgba(255,255,255,0.07)"}`,
               }}
             >
+              {/* ACC: non-colour marker for hint-revealed cells — a small
+                  corner dot, distinct from peer/same-value highlighting which
+                  is colour-only. */}
+              {isHint && (
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute right-1 top-1 h-1.5 w-1.5 rounded-full"
+                  style={{ background: SAME }}
+                />
+              )}
               {value !== 0 ? (
                 value
               ) : cellNotes.size > 0 ? (
@@ -702,15 +827,34 @@ export function Sudoku({
         />
       </div>
 
+      {/* WIN: a low-key give-up path so a stuck player can review the answer and
+          leave satisfied rather than abandoning. Records a loss, no score. */}
+      {!won && (
+        <button
+          type="button"
+          onClick={revealSolution}
+          className={cn(
+            "mt-3 rounded-pill px-4 py-2 font-display text-[12.5px] text-ink-mute outline-none",
+            !reducedMotion && "transition-colors active:scale-[0.98]",
+          )}
+          style={{ background: "transparent" }}
+        >
+          Reveal solution
+        </button>
+      )}
+
       <CompletionModal
         open={showModal}
         onClose={() => setShowModal(false)}
         accent={ACCENT}
-        title="Grid solved."
-        statValue={formatClock(finalMsRef.current)}
-        statLabel="SOLVE TIME"
+        won={!gaveUp}
+        title={gaveUp ? "Solution revealed." : "Grid solved."}
+        statValue={gaveUp ? undefined : formatClock(finalMsRef.current)}
+        statLabel={gaveUp ? undefined : "SOLVE TIME"}
         insight={INSIGHT}
-        share={shareLine(finalMsRef.current)}
+        share={gaveUp ? undefined : shareLine(finalMsRef.current)}
+        onReplay={reset}
+        replayLabel="Play again"
       />
     </div>
   );

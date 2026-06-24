@@ -45,12 +45,16 @@ export function StroopRush({
   savedState,
   onPersistState,
   reducedMotion,
+  difficulty,
 }: GameComponentProps<StroopPuzzle, StroopState>) {
   const params = puzzle.params;
   const setSize = params.colorSet.length;
   const saved = savedState ?? null;
   // A finished saved game starts back at idle so the player can replay.
   const resumable = !!saved && !saved.ended;
+  // Per-tier personal best (correct count) lives in localStorage so it persists
+  // across days/sessions without touching shared progress state.
+  const bestKey = `braintap.stroop.best.${difficulty ?? puzzle.difficulty ?? "medium"}`;
 
   const [idx, setIdx] = useState<number>(() => (resumable ? saved!.idx : 0));
   const [correct, setCorrect] = useState<number>(() => (resumable ? saved!.correct : 0));
@@ -65,6 +69,18 @@ export function StroopRush({
   const [wrongIdx, setWrongIdx] = useState<number | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [liveStatus, setLiveStatus] = useState("");
+  // Assertive announcement of the current trial's ink for eyes-free play.
+  const [trialStatus, setTrialStatus] = useState("");
+  // Transient penalty flag → drives the "-2s" float + SECONDS card pulse.
+  const [penalty, setPenalty] = useState(false);
+  // Fired once when `correct` first reaches the tier goal (micro-celebration).
+  const [goalHit, setGoalHit] = useState(false);
+  // Per-tier personal best (correct count), loaded from storage.
+  const [best, setBest] = useState<number | null>(null);
+  // True for the just-finished round when it beat the stored best.
+  const [isRecord, setIsRecord] = useState(false);
+  // Short "Resuming — N left" countdown shown before re-arming a low-time resume.
+  const [resumeCountdown, setResumeCountdown] = useState<number | null>(null);
 
   const deadlineRef = useRef<number | null>(null);
   const completedRef = useRef(false);
@@ -73,6 +89,26 @@ export function StroopRush({
   const remainingRef = useRef(remainingMs);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shakeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const penaltyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Guards a trial against rapid double-fire: holds the idx the last answer
+  // consumed; a second tap resolving to the same idx is ignored until advance.
+  const lockedIdxRef = useRef<number | null>(null);
+  const bestRef = useRef<number | null>(null);
+
+  // Load the per-tier personal best (and refresh if the tier key changes).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(bestKey);
+      const n = raw == null ? NaN : Number(raw);
+      const v = Number.isFinite(n) ? n : null;
+      setBest(v);
+      bestRef.current = v;
+    } catch {
+      setBest(null);
+      bestRef.current = null;
+    }
+  }, [bestKey]);
 
   useEffect(() => {
     correctRef.current = correct;
@@ -89,6 +125,7 @@ export function StroopRush({
     () => () => {
       if (flashTimer.current) clearTimeout(flashTimer.current);
       if (shakeTimer.current) clearTimeout(shakeTimer.current);
+      if (penaltyTimer.current) clearTimeout(penaltyTimer.current);
     },
     [],
   );
@@ -123,8 +160,23 @@ export function StroopRush({
     setPhase("done");
     const finalCorrect = correctRef.current;
     const won = isWin(finalCorrect, params);
+    // Update the per-tier personal best before showing the modal.
+    const prevBest = bestRef.current;
+    const record = finalCorrect > 0 && (prevBest == null || finalCorrect > prevBest);
+    setIsRecord(record);
+    if (record) {
+      setBest(finalCorrect);
+      bestRef.current = finalCorrect;
+      try {
+        window.localStorage.setItem(bestKey, String(finalCorrect));
+      } catch {
+        /* storage unavailable — best stays in-memory for this session */
+      }
+    }
     setLiveStatus(
-      `Time! ${finalCorrect} correct.` + (won ? " Goal reached." : ` Need ${goal} to clear.`),
+      `Time! ${finalCorrect} correct.` +
+        (won ? " Goal reached." : ` Need ${goal} to clear.`) +
+        (record ? " New personal best." : ""),
     );
     haptics.win();
     sfx.win();
@@ -147,11 +199,44 @@ export function StroopRush({
     });
     setTimeout(() => setShowModal(true), reducedMotion ? 0 : 280);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onComplete, onPersistState, params, goal, idx, puzzle.difficulty, reducedMotion]);
+  }, [onComplete, onPersistState, params, goal, idx, puzzle.difficulty, reducedMotion, bestKey]);
+
+  // ---- low-time resume guard -------------------------------------------------
+  // A round resumed with very little time left would otherwise end the instant
+  // the player looks at it (or after a single wrong tap). Hold the clock and run
+  // a short visible "Resuming — N left" countdown so the end isn't a surprise.
+  const RESUME_GRACE_MS = 1500;
+  useEffect(() => {
+    if (!resumable) return;
+    const left = Math.max(0, saved!.remainingMs);
+    if (left > 0 && left < RESUME_GRACE_MS) {
+      // Freeze the clock until the grace countdown completes.
+      deadlineRef.current = null;
+      const start = Math.max(1, Math.ceil(left / 1000));
+      setResumeCountdown(start);
+      setLiveStatus(`Resuming — ${start} second${start === 1 ? "" : "s"} left.`);
+      let n = start;
+      const id = setInterval(() => {
+        n -= 1;
+        if (n <= 0) {
+          clearInterval(id);
+          setResumeCountdown(null);
+          // Re-arm the clock from the snapshot so ticking can begin.
+          deadlineRef.current = Date.now() + remainingRef.current;
+        } else {
+          setResumeCountdown(n);
+        }
+      }, 1000);
+      return () => clearInterval(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---- countdown clock -------------------------------------------------------
   useEffect(() => {
     if (phase !== "playing") return;
+    // Hold ticking while a low-time resume grace countdown is running.
+    if (resumeCountdown != null) return;
     if (deadlineRef.current == null) {
       deadlineRef.current = Date.now() + remainingRef.current;
     }
@@ -172,7 +257,7 @@ export function StroopRush({
     const t = setInterval(tick, 200);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
+  }, [phase, resumeCountdown]);
 
   // Pause the clock when the tab is backgrounded so it doesn't drain unfairly.
   useEffect(() => {
@@ -187,13 +272,14 @@ export function StroopRush({
           setRemainingMs(left);
         }
         deadlineRef.current = null;
-      } else {
+      } else if (resumeCountdown == null) {
+        // Don't arm the clock mid resume-grace countdown.
         deadlineRef.current = Date.now() + remainingRef.current;
       }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [phase]);
+  }, [phase, resumeCountdown]);
 
   // ---- actions ---------------------------------------------------------------
   const start = useCallback(() => {
@@ -208,26 +294,63 @@ export function StroopRush({
     deadlineRef.current = Date.now() + params.durationMs;
     setShowModal(false);
     setWrongIdx(null);
+    setGoalHit(false);
+    setPenalty(false);
+    setIsRecord(false);
+    setResumeCountdown(null);
+    lockedIdxRef.current = null;
     setLiveStatus("Round started. Tap the ink colour.");
+    // Announce the first trial's ink for eyes-free players.
+    const first = puzzle.trials[0];
+    if (first) {
+      setTrialStatus(
+        `Ink ${CANONICAL_COLORS[params.colorSet[first.inkIdx]].label.toLowerCase()} — choose it.`,
+      );
+    }
     setPhase("playing");
     haptics.tap();
     sfx.tap();
-  }, [params.durationMs]);
+  }, [params.durationMs, params.colorSet, puzzle.trials]);
 
   const answer = useCallback(
     (tapIdx: number) => {
       if (phase !== "playing") return;
-      const cur = puzzle.trials[Math.min(idx, puzzle.trials.length - 1)];
+      // Hold input while a low-time resume grace countdown is running.
+      if (resumeCountdown != null) return;
+      const curIdx = Math.min(idx, puzzle.trials.length - 1);
+      const cur = puzzle.trials[curIdx];
       if (!cur) return;
+      // Double-fire guard: a correct tap locks this trial's idx until the next
+      // trial renders. Ignore any further taps that still resolve to it (covers
+      // both the touch and keyboard paths).
+      if (lockedIdxRef.current === curIdx) return;
       if (tapIdx === cur.inkIdx) {
+        lockedIdxRef.current = curIdx;
         // Correct — advance to the next trial.
         const nc = correctRef.current + 1;
         correctRef.current = nc;
         setCorrect(nc);
-        setIdx((i) => Math.min(i + 1, puzzle.trials.length - 1));
-        setLiveStatus(`Correct. ${nc} of ${goal}.`);
-        haptics.success();
-        sfx.correct();
+        const nextIdx = Math.min(curIdx + 1, puzzle.trials.length - 1);
+        setIdx(nextIdx);
+        // One-shot micro-celebration the instant the goal is reached.
+        const reachedGoal = nc === goal;
+        if (reachedGoal) {
+          setGoalHit(true);
+          setLiveStatus(`Goal reached — ${nc} correct. Keep going for bonus!`);
+          haptics.win();
+          sfx.win();
+        } else {
+          setLiveStatus(`Correct. ${nc} of ${goal}.`);
+          haptics.success();
+          sfx.correct();
+        }
+        // Announce the upcoming trial's ink for eyes-free play (assertive).
+        const next = puzzle.trials[nextIdx];
+        if (next) {
+          setTrialStatus(
+            `Ink ${CANONICAL_COLORS[params.colorSet[next.inkIdx]].label.toLowerCase()} — choose it.`,
+          );
+        }
         if (!reducedMotion) {
           setFlash(true);
           if (flashTimer.current) clearTimeout(flashTimer.current);
@@ -247,6 +370,10 @@ export function StroopRush({
         haptics.error();
         sfx.wrong();
         setWrongIdx(tapIdx);
+        // Surface the time loss: a "-Ns" float + a pulse on the SECONDS card.
+        setPenalty(true);
+        if (penaltyTimer.current) clearTimeout(penaltyTimer.current);
+        penaltyTimer.current = setTimeout(() => setPenalty(false), 700);
         if (!reducedMotion) {
           setShake(true);
           if (shakeTimer.current) clearTimeout(shakeTimer.current);
@@ -260,8 +387,18 @@ export function StroopRush({
         if (left <= 0) finish();
       }
     },
-    [phase, idx, puzzle.trials, params, goal, reducedMotion, finish],
+    [phase, idx, puzzle.trials, params, goal, reducedMotion, finish, resumeCountdown],
   );
+
+  // End the round early. Scores whatever the player has — mirrors the timer
+  // expiring, so it always lands on the completion modal rather than discarding.
+  const giveUp = useCallback(() => {
+    if (phase !== "playing") return;
+    setRemainingMs(0);
+    remainingRef.current = 0;
+    deadlineRef.current = null;
+    finish();
+  }, [phase, finish]);
 
   // ---- keyboard: 1..N map to swatches ---------------------------------------
   useEffect(() => {
@@ -296,31 +433,57 @@ export function StroopRush({
   const cols = setSize <= 4 ? 2 : 3;
 
   return (
-    <div className="flex w-full flex-col items-center" style={{ maxWidth: "min(92vw, 380px)" }}>
+    <div
+      className="flex w-full flex-col items-center"
+      style={{
+        maxWidth: "min(92vw, 380px)",
+        // Keep bottom controls clear of the home indicator on notched devices.
+        paddingBottom: "env(safe-area-inset-bottom)",
+      }}
+    >
       {/* stats bar */}
       <div className="grid w-full grid-cols-3 gap-2.5">
         <StatCard
           value={String(remainingSec)}
           label="SECONDS"
-          color={timeLow ? "#ff8a4c" : ACCENT.solid}
-          pulse={timeLow && !reducedMotion}
+          color={timeLow || penalty ? "#ff8a4c" : ACCENT.solid}
+          pulse={(timeLow || penalty) && !reducedMotion}
           progress={phase === "playing" ? timeFrac : undefined}
-          progressColor={timeLow ? "#ff8a4c" : ACCENT.solid}
+          progressColor={timeLow || penalty ? "#ff8a4c" : ACCENT.solid}
+          penaltyFloat={penalty ? `-${params.penaltyMs / 1000}s` : undefined}
+          reducedMotion={reducedMotion}
         />
         <StatCard
           value={`${correct}/${goal}`}
           label="CORRECT"
-          color="#eafcff"
+          // Recolour to the accent once the goal is cleared — bonus territory.
+          color={goalHit ? ACCENT.solid : "#eafcff"}
           flash={flash}
           flashColor={ACCENT.solid}
           accentBorder
+          badge={goalHit ? "GOAL!" : undefined}
+          reducedMotion={reducedMotion}
         />
         <StatCard value={String(mistakes)} label="SLIPS" color="#ff8a4c" />
       </div>
 
-      {/* polite live region for screen readers */}
+      {/* personal best for this tier */}
+      {best != null && (
+        <p
+          className="mt-2 font-mono text-[10px] tracking-[0.12em]"
+          style={{ color: "rgba(226,234,255,0.5)" }}
+        >
+          PERSONAL BEST · <span style={{ color: ACCENT.soft }}>{best} CORRECT</span>
+        </p>
+      )}
+
+      {/* polite live region for status/outcome */}
       <p className="sr-only" role="status" aria-live="polite">
         {liveStatus}
+      </p>
+      {/* assertive region: announces each new trial's ink for eyes-free play */}
+      <p className="sr-only" role="status" aria-live="assertive">
+        {trialStatus}
       </p>
 
       {/* word prompt panel */}
@@ -347,7 +510,22 @@ export function StroopRush({
             : "Tap start to begin"
         }
       >
-        {trial && phase !== "idle" ? (
+        {resumeCountdown != null ? (
+          <span className="flex flex-col items-center gap-1.5 px-6 text-center">
+            <span className="font-mono text-[11px] tracking-[0.18em] text-[rgba(226,234,255,0.6)]">
+              RESUMING
+            </span>
+            <span
+              className={cn("font-display text-[44px] font-bold leading-none", !reducedMotion && "animate-pop")}
+              style={{ color: ACCENT.solid }}
+            >
+              {resumeCountdown}
+            </span>
+            <span className="font-mono text-[10px] tracking-[0.14em] text-ink-faint">
+              {resumeCountdown === 1 ? "SECOND LEFT" : "SECONDS LEFT"}
+            </span>
+          </span>
+        ) : trial && phase !== "idle" ? (
           <span
             className="select-none font-display font-bold tracking-wide"
             style={{
@@ -460,9 +638,24 @@ export function StroopRush({
           </button>
         </div>
       ) : (
-        <p className="mt-6 text-center font-mono text-[10.5px] tracking-[0.08em] text-ink-faint">
-          TAP THE INK COLOUR · NOT THE WORD
-        </p>
+        <div className="mt-6 flex w-full flex-col items-center gap-3">
+          <p className="text-center font-mono text-[10.5px] tracking-[0.08em] text-ink-faint">
+            TAP THE INK COLOUR · NOT THE WORD
+          </p>
+          <button
+            type="button"
+            onClick={giveUp}
+            disabled={resumeCountdown != null}
+            className={cn(
+              "rounded-lg border border-line-strong bg-white/[0.04] px-5 py-2 font-display text-[12.5px] font-semibold text-[rgba(226,234,255,0.7)]",
+              !reducedMotion && "transition-colors duration-150 hover:text-ink active:scale-95",
+              resumeCountdown != null && "opacity-40",
+            )}
+            aria-label="End round now and see your result"
+          >
+            End round
+          </button>
+        </div>
       )}
 
       <CompletionModal
@@ -476,6 +669,22 @@ export function StroopRush({
         insight={INSIGHT}
         share={buildShareText(finalCorrect, params)}
         won={won}
+        onReplay={start}
+        replayLabel="Play again"
+        extra={
+          isRecord ? (
+            <div
+              className="rounded-pill px-3 py-1.5 font-mono text-[11px] font-semibold tracking-[0.12em] text-[#04060f]"
+              style={{ backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})` }}
+            >
+              ★ NEW BEST · {finalCorrect} CORRECT
+            </div>
+          ) : best != null ? (
+            <div className="font-mono text-[11px] tracking-[0.12em] text-ink-faint">
+              PERSONAL BEST · {best} CORRECT
+            </div>
+          ) : undefined
+        }
       />
     </div>
   );
@@ -491,6 +700,9 @@ function StatCard({
   pulse = false,
   progress,
   progressColor,
+  penaltyFloat,
+  badge,
+  reducedMotion = false,
 }: {
   value: string;
   label: string;
@@ -501,11 +713,19 @@ function StatCard({
   pulse?: boolean;
   progress?: number;
   progressColor?: string;
+  /** When set, shows a transient floating label (e.g. "-2s") above the value. */
+  penaltyFloat?: string;
+  /** When set, shows a small badge (e.g. "GOAL!") at the top of the card. */
+  badge?: string;
+  reducedMotion?: boolean;
 }) {
   return (
     <div
       className={cn(
-        "relative flex flex-col items-center justify-center overflow-hidden rounded-2xl px-2 py-3",
+        "relative flex flex-col items-center justify-center rounded-2xl px-2 py-3",
+        // Let the GOAL/-Ns overlays escape the card; otherwise clip the
+        // bottom progress bar to the rounded corners.
+        badge || penaltyFloat ? "overflow-visible" : "overflow-hidden",
         pulse && "animate-pulse2",
       )}
       style={{
@@ -515,6 +735,29 @@ function StatCard({
         border: `1px solid ${accentBorder ? `${ACCENT.solid}4d` : "rgba(255,255,255,0.1)"}`,
       }}
     >
+      {badge && (
+        <span
+          className={cn(
+            "absolute -top-2 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-pill px-2 py-0.5 font-mono text-[8.5px] font-bold tracking-[0.1em] text-[#04060f]",
+            !reducedMotion && "animate-pop",
+          )}
+          style={{ backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})` }}
+        >
+          {badge}
+        </span>
+      )}
+      {penaltyFloat && (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute -top-1 right-1 font-display text-[15px] font-bold",
+            !reducedMotion && "animate-rise",
+          )}
+          style={{ color: "#ff5470", textShadow: "0 1px 3px rgba(0,0,0,0.6)" }}
+        >
+          {penaltyFloat}
+        </span>
+      )}
       <div
         className="font-display text-[30px] font-semibold leading-none transition-colors duration-150"
         style={{ color: flash && flashColor ? flashColor : color }}

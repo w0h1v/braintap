@@ -47,6 +47,9 @@ interface SlideState {
   hintsUsed: number;
   /** Grid edge length this save belongs to (back-compat: absent on old saves). */
   size?: number;
+  /** Personal best for this tier — survives replays/resets so the loop has a goal. */
+  bestMoves?: number;
+  bestMs?: number;
 }
 
 const shareLine = (moves: number, ms: number, size: number) =>
@@ -84,13 +87,37 @@ export function Slide({
   const [focus, setFocus] = useState(0);
   const [solving, setSolving] = useState(false);
   const [nudge, setNudge] = useState(false);
+  // Move history (prior board snapshots) backing the Undo control. The engine is
+  // pure, so an undo is simply restoring the previous board — no inverse needed.
+  const [history, setHistory] = useState<Board[]>([]);
+  // Personal best for this tier (moves + ms), surfaced live as a "beat it" goal.
+  const [bestMoves, setBestMoves] = useState<number | undefined>(() => saved?.bestMoves);
+  const [bestMs, setBestMs] = useState<number | undefined>(() => saved?.bestMs);
   const completedRef = useRef(false);
   const finalMsRef = useRef(saved?.won ? (saved?.elapsedMs ?? 0) : 0);
+  // Monotonic start timestamp + accumulated base, so the winning time is read at
+  // the exact solving move rather than from the 250ms-throttled clock state.
+  const startedAtRef = useRef<number | null>(null);
+  const baseMsRef = useRef(saved?.won ? 0 : (saved?.elapsedMs ?? 0));
   const hintsUsedRef = useRef(hintsUsed);
   hintsUsedRef.current = hintsUsed;
+  const bestMovesRef = useRef(bestMoves);
+  bestMovesRef.current = bestMoves;
+  const bestMsRef = useRef(bestMs);
+  bestMsRef.current = bestMs;
   const hintTimerRef = useRef<number | null>(null);
   // Guards the rewarded-ad hint flow against re-entrancy while an ad is showing.
   const adInFlightRef = useRef(false);
+  const boardRef = useRef<HTMLDivElement | null>(null);
+  // True only when this mount resumed an already-won save (a "replaying" view).
+  // Cleared by Play again so a fresh attempt re-enables the controls.
+  const alreadyWonOnLoadRef = useRef(saved?.won ?? false);
+
+  // Exact elapsed ms from a monotonic source (single source of truth at finish).
+  const elapsedNow = useCallback(
+    () => baseMsRef.current + (startedAtRef.current != null ? Date.now() - startedAtRef.current : 0),
+    [],
+  );
 
   // Lower bound on remaining moves (used for the share/stat efficiency hint).
   const optimalLB = useMemo(() => manhattan(puzzle.start, size), [puzzle.start, size]);
@@ -110,7 +137,10 @@ export function Slide({
         ? savedState
         : null;
     completedRef.current = false;
+    alreadyWonOnLoadRef.current = fresh?.won ?? false;
     finalMsRef.current = fresh?.won ? (fresh?.elapsedMs ?? 0) : 0;
+    startedAtRef.current = null;
+    baseMsRef.current = fresh?.won ? 0 : (fresh?.elapsedMs ?? 0);
     setBoard(fresh?.board?.slice() ?? puzzle.start.slice());
     setMoves(fresh?.moves ?? 0);
     setWon(fresh?.won ?? false);
@@ -119,6 +149,9 @@ export function Slide({
     setShowModal(false);
     setFocus(0);
     setSolving(false);
+    setHistory([]);
+    setBestMoves(fresh?.bestMoves);
+    setBestMs(fresh?.bestMs);
     clock.reset(fresh?.elapsedMs ?? 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [puzzleSig]);
@@ -132,9 +165,11 @@ export function Slide({
       won,
       hintsUsed,
       size,
+      bestMoves,
+      bestMs,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [board, moves, won, hintsUsed]);
+  }, [board, moves, won, hintsUsed, bestMoves, bestMs]);
 
   useEffect(
     () => () => {
@@ -148,10 +183,25 @@ export function Slide({
       if (completedRef.current) return;
       completedRef.current = true;
       clock.stop();
+      startedAtRef.current = null;
       finalMsRef.current = finalMs;
       setWon(true);
       setSolving(true);
       setHintCell(-1);
+      // Record a personal best (fewest moves; on a moves tie, the faster time).
+      // Read the prior best from a ref so the update is independent of stale state.
+      {
+        const prevBM = bestMovesRef.current;
+        const prevBMs = bestMsRef.current;
+        const better =
+          prevBM == null ||
+          finalMoves < prevBM ||
+          (finalMoves === prevBM && (prevBMs == null || finalMs < prevBMs));
+        if (better) {
+          setBestMoves(finalMoves);
+          setBestMs(finalMs);
+        }
+      }
       haptics.win();
       sfx.win();
       setTimeout(() => setShowModal(true), reducedMotion ? 120 : 620);
@@ -194,7 +244,11 @@ export function Slide({
         }
         const next = applyMove(cur, p, size);
         const startTimer = moves === 0;
-        if (startTimer) clock.start();
+        if (startTimer) {
+          clock.start();
+          startedAtRef.current = Date.now(); // monotonic anchor for the win time
+        }
+        setHistory((h) => [...h, cur]); // snapshot for Undo (engine is pure)
         setMoves((m) => m + 1);
         setFocus(p); // the blank moved to where the tile was; keep focus on a real tile
         setHintCell(-1); // any move clears an outstanding hint highlight
@@ -203,13 +257,71 @@ export function Slide({
         if (isSolved(next)) {
           // moves state hasn't flushed yet; compute the final count locally.
           const finalMoves = moves + 1;
-          queueMicrotask(() => finish(finalMoves, clock.ms));
+          // Read the time from the monotonic source at the solving move so the
+          // recorded/displayed time can't be up to 250ms stale or disagree.
+          const finalMs = elapsedNow();
+          queueMicrotask(() => finish(finalMoves, finalMs));
         }
         return next;
       });
     },
-    [won, moves, clock, finish, reducedMotion, size],
+    [won, moves, clock, finish, reducedMotion, size, elapsedNow],
   );
+
+  // Undo the last move: restore the previous board snapshot and decrement the
+  // move count. Cheap and exact because the engine is pure (no inverse needed).
+  const undo = useCallback(() => {
+    if (won || completedRef.current) return;
+    setHistory((h) => {
+      if (h.length === 0) return h;
+      const prev = h[h.length - 1];
+      setBoard(prev.slice());
+      setMoves((m) => Math.max(0, m - 1));
+      setHintCell(-1);
+      setFocus(blankPos(prev));
+      haptics.tap();
+      sfx.tap();
+      return h.slice(0, -1);
+    });
+  }, [won]);
+
+  // Reset the current attempt back to the scrambled start (keeps the timer
+  // running so it stays an honest "this attempt" clock). Best is preserved.
+  const reset = useCallback(() => {
+    if (completedRef.current) return;
+    setBoard(puzzle.start.slice());
+    setMoves(0);
+    setHistory([]);
+    setHintCell(-1);
+    setFocus(0);
+    startedAtRef.current = null;
+    baseMsRef.current = 0;
+    clock.stop();
+    clock.reset(0);
+    haptics.tap();
+  }, [puzzle.start, clock]);
+
+  // Play again after a solve: replay the same puzzle to beat your time/moves.
+  // (The daily scramble is deterministic per date+tier, so a true reshuffle
+  // would need a non-deterministic generator — deferred to avoid engine risk.)
+  const playAgain = useCallback(() => {
+    completedRef.current = false;
+    alreadyWonOnLoadRef.current = false; // a fresh attempt, not a resumed replay
+    finalMsRef.current = 0;
+    startedAtRef.current = null;
+    baseMsRef.current = 0;
+    setBoard(puzzle.start.slice());
+    setMoves(0);
+    setWon(false);
+    setHintsUsed(0);
+    setHintCell(-1);
+    setHistory([]);
+    setShowModal(false);
+    setFocus(0);
+    setSolving(false);
+    clock.reset(0);
+    haptics.tap();
+  }, [puzzle.start, clock]);
 
   // Hint: compute a sensible next move (pure helper), highlight it, then auto-make
   // it after a short beat so the player sees which tile moved. Deducts score.
@@ -247,19 +359,6 @@ export function Slide({
 
   // Keyboard: arrow keys slide the tile from that direction into the blank.
   // Tab focus + Enter/Space activates the focused tile.
-  const moveFocus = useCallback(
-    (dr: number, dc: number) => {
-      setFocus((cur) => {
-        let r = Math.floor(cur / size) + dr;
-        let c = (cur % size) + dc;
-        r = Math.max(0, Math.min(size - 1, r));
-        c = Math.max(0, Math.min(size - 1, c));
-        return r * size + c;
-      });
-    },
-    [size],
-  );
-
   const slideFromDirection = useCallback(
     (dir: "up" | "down" | "left" | "right") => {
       // The blank "absorbs" the tile in the given direction relative to it.
@@ -276,8 +375,11 @@ export function Slide({
     [board, slideAt, size],
   );
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+  // Arrow keys slide a tile into the gap. Scoped to the board (handler lives on
+  // the board element, not window) so it only fires when the board owns focus —
+  // page scrolling and the tier-tab arrow navigation are no longer shadowed.
+  const onBoardKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (won) return;
       switch (e.key) {
         case "ArrowUp":
@@ -299,17 +401,15 @@ export function Slide({
         default:
           break;
       }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [won, slideFromDirection]);
+    },
+    [won, slideFromDirection],
+  );
 
-  const alreadyWonOnLoad = useRef(saved?.won ?? false);
   const isComplete = won || isSolved(board);
   const blank = blankPos(board);
   const movable = useMemo(() => new Set(neighbors(blank, size)), [blank, size]);
 
-  const replayed = alreadyWonOnLoad.current && !isComplete;
+  const replayed = alreadyWonOnLoadRef.current && !isComplete;
 
   // Tiles in their final position (excluding the blank) — drives the progress bar.
   const placed = useMemo(() => {
@@ -394,11 +494,28 @@ export function Slide({
         />
       </div>
 
+      {/* live targets: move-par (Manhattan lower bound) + personal best, giving
+          each session a self-competition goal beyond "eventually finish". */}
+      <div
+        className="mt-2 flex w-full items-center justify-center gap-3 font-mono text-[10.5px] tracking-[0.1em] text-ink-faint"
+        style={{ maxWidth: BOARD_W }}
+      >
+        <span aria-label={`Par ${optimalLB} moves (fewest possible)`}>
+          PAR <span style={{ color: ACCENT.soft }}>{optimalLB}</span>
+        </span>
+        {bestMoves != null && (
+          <span aria-label={`Your best: ${bestMoves} moves${bestMs != null ? `, ${formatClock(bestMs)}` : ""}`}>
+            BEST <span style={{ color: ACCENT.soft }}>{bestMoves}</span>
+            {bestMs != null && <> · {formatClock(bestMs)}</>}
+          </span>
+        )}
+      </div>
+
       {/* status message line (visible) */}
       <div
         id="slide-msg"
         aria-hidden
-        className="mb-1 mt-3 min-h-[18px] text-center font-mono text-[12.5px]"
+        className="mb-1 mt-2 min-h-[18px] text-center font-mono text-[12.5px]"
         style={{ color: ACCENT.soft }}
       >
         {isComplete ? "Solved!" : replayed ? "Replaying — beat your time." : ""}
@@ -406,10 +523,13 @@ export function Slide({
 
       <div
         id="slide-board"
+        ref={boardRef}
         role="grid"
-        aria-label={`Tile slide board, ${size} by ${size}`}
+        aria-label={`Tile slide board, ${size} by ${size}. Use arrow keys to slide.`}
+        tabIndex={isComplete ? -1 : 0}
+        onKeyDown={onBoardKeyDown}
         className={cn(
-          "relative w-full rounded-2xl p-2",
+          "relative w-full rounded-2xl p-2 outline-none focus-visible:ring-2",
           nudge && !reducedMotion && "animate-shake",
         )}
         style={{
@@ -421,6 +541,7 @@ export function Slide({
             ? `0 18px 50px -18px ${ACCENT.solid}80, inset 0 0 50px -30px ${ACCENT.solid}`
             : `0 14px 40px -24px ${ACCENT.solid}55, inset 0 0 40px -34px ${ACCENT.solid}`,
           transition: reducedMotion ? undefined : "border-color 0.4s ease, box-shadow 0.4s ease",
+          ["--tw-ring-color" as string]: `${ACCENT.solid}cc`,
         }}
       >
         {/* Inner stage: padding lives on the board; tiles are positioned within
@@ -481,10 +602,7 @@ export function Slide({
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     slideAt(i);
-                  } else if (e.key === "w") moveFocus(-1, 0);
-                  else if (e.key === "s") moveFocus(1, 0);
-                  else if (e.key === "a") moveFocus(0, -1);
-                  else if (e.key === "d") moveFocus(0, 1);
+                  }
                 }}
                 disabled={isComplete}
                 className={cn(
@@ -539,8 +657,41 @@ export function Slide({
         </div>
       </div>
 
-      {/* hint control */}
-      <div className="mt-3 flex w-full items-center justify-center" style={{ maxWidth: BOARD_W }}>
+      {/* controls: undo / reset / hint */}
+      <div
+        className="mt-3 flex w-full items-center justify-center gap-2"
+        style={{ maxWidth: BOARD_W }}
+      >
+        <button
+          type="button"
+          onClick={undo}
+          disabled={isComplete || replayed || history.length === 0}
+          aria-label="Undo last move"
+          className="rounded-pill border px-3 py-2 font-mono text-[11px] font-semibold tracking-[0.1em] outline-none transition focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-40"
+          style={{
+            color: ACCENT.soft,
+            borderColor: `${ACCENT.solid}40`,
+            background: `${ACCENT.solid}14`,
+            ["--tw-ring-color" as string]: `${ACCENT.solid}cc`,
+          }}
+        >
+          ↶ UNDO
+        </button>
+        <button
+          type="button"
+          onClick={reset}
+          disabled={isComplete || replayed || moves === 0}
+          aria-label="Reset the board to the start"
+          className="rounded-pill border px-3 py-2 font-mono text-[11px] font-semibold tracking-[0.1em] outline-none transition focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-40"
+          style={{
+            color: ACCENT.soft,
+            borderColor: `${ACCENT.solid}40`,
+            background: `${ACCENT.solid}14`,
+            ["--tw-ring-color" as string]: `${ACCENT.solid}cc`,
+          }}
+        >
+          ↺ RESET
+        </button>
         <HintButton
           used={hintsUsed}
           max={MAX_HINTS}
@@ -551,12 +702,34 @@ export function Slide({
         />
       </div>
 
+      {/* Play again after a solve: replay the same board to beat your time/moves. */}
+      {isComplete && (
+        <div
+          className="mt-2.5 flex w-full items-center justify-center"
+          style={{ maxWidth: BOARD_W }}
+        >
+          <button
+            type="button"
+            onClick={playAgain}
+            className="rounded-pill border px-4 py-2 font-mono text-[11px] font-semibold tracking-[0.1em] outline-none transition focus-visible:ring-2"
+            style={{
+              color: "#04060f",
+              border: "none",
+              backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`,
+              ["--tw-ring-color" as string]: `${ACCENT.solid}cc`,
+            }}
+          >
+            ↻ PLAY AGAIN
+          </button>
+        </div>
+      )}
+
       <p
         className="mt-3 text-center font-mono text-[11px] leading-relaxed text-ink-faint"
         style={{ maxWidth: BOARD_W }}
       >
         Tap a tile next to the gap to slide it. Order 1 → {lastTile} with the gap last. Arrow keys
-        work too.
+        slide when the board is focused; undo or reset anytime.
       </p>
 
       {/* Keyframes for the hint pulse. Defined inline so the game folder is self-contained. */}
@@ -588,6 +761,8 @@ export function Slide({
           </div>
         }
         share={shareLine(moves, finalMsRef.current, size)}
+        onReplay={playAgain}
+        replayLabel="Play again — beat your time"
       />
     </div>
   );

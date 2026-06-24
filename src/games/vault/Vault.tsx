@@ -24,6 +24,13 @@ const INSIGHT = GAME_METAS.vault.insight;
 const GOOD = "#7cf5c4";
 const BAD = "#ff5a7c";
 
+/** Single source of truth for the share string so every surface matches. */
+function vaultShareText(reach: number, held: number, cleared: number): string {
+  return `BrainTap · Memory Vault\nReached round ${reach} (${held} cells held)\n\n${
+    "🟦".repeat(Math.min(cleared, 10)) || "—"
+  }\nbraintap.app/games`;
+}
+
 type Phase = "idle" | "show" | "input" | "cleared" | "over";
 
 interface VaultState {
@@ -73,6 +80,16 @@ export function Vault({
   const [showModal, setShowModal] = useState(false);
   const [shake, setShake] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  // Bumped to force a fresh run on in-game replay/retry (see resetRun).
+  const [attempt, setAttempt] = useState(0);
+  // Personal best (deepest "cells held") for this tier, persisted locally so a
+  // player can chase their own record across sessions.
+  const [best, setBest] = useState<number | null>(null);
+  // Final reach/held computed once at end-of-run so the header, the on-board
+  // result, the modal, and the share string can never disagree (MECH fix).
+  const [result, setResult] = useState<{ reach: number; held: number } | null>(null);
+  // True when the just-finished run set a new personal best for this tier.
+  const [isRecord, setIsRecord] = useState(false);
 
   const completedRef = useRef(false);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -85,9 +102,22 @@ export function Vault({
   // thus this signature) changes and we reset the in-progress run.
   const tierSig = `${grid}:${initialLevel}:${maxRounds}`;
   const lastTierSigRef = useRef(tierSig);
+  const bestKey = `braintap.vault.best.${tierSig}`;
 
   const level = levelForRound(round, initialLevel);
   const pattern = puzzle.rounds[Math.min(round, maxRounds) - 1];
+
+  // Load the personal best for the active tier (and refresh on tier switch).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(bestKey);
+      const n = raw == null ? NaN : Number(raw);
+      setBest(Number.isFinite(n) ? n : null);
+    } catch {
+      setBest(null);
+    }
+  }, [bestKey]);
 
   // Clean up any pending timers on unmount.
   useEffect(() => {
@@ -122,7 +152,33 @@ export function Vault({
     setShowModal(false);
     setShake(false);
     setHasStarted(false);
+    setResult(null);
+    setIsRecord(false);
   }, [tierSig]);
+
+  // Instant in-game replay/retry: re-run the same tier from round 1 without a
+  // navigation. Mirrors the tier-switch reset above. `onComplete` already fired
+  // for the prior run; clearing completedRef lets the next run report again.
+  const resetRun = useCallback(() => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    completedRef.current = false;
+    startedAtRef.current = null;
+    elapsedRef.current = 0;
+    setRound(1);
+    setPhase("idle");
+    setPicked(new Set());
+    setLit(new Set());
+    setBadCell(null);
+    setEnded(false);
+    setWon(false);
+    setShowModal(false);
+    setShake(false);
+    setHasStarted(false);
+    setResult(null);
+    setIsRecord(false);
+    setAttempt((a) => a + 1);
+  }, []);
 
   // Persist resumable progress (highest round reached + end status + tier).
   useEffect(() => {
@@ -144,7 +200,9 @@ export function Vault({
           : phase === "over"
             ? won
               ? "Vault mastered ✓"
-              : "Wrong cell — run over"
+              : result
+                ? `So close — you held ${result.held} cell${result.held === 1 ? "" : "s"}`
+                : "So close — give it another go"
             : "Memorize the lit cells, then tap them back.";
 
   const endGame = useCallback(
@@ -168,6 +226,21 @@ export function Vault({
       // Score: progress through the run (0..100). A win is 100.
       const cleared = didWin ? maxRounds : finalRound - 1;
       const score = didWin ? 100 : Math.round((cleared / maxRounds) * 100);
+      // Single source of truth for reach/held used by header, modal & share.
+      setResult({ reach, held });
+
+      // Update the per-tier personal best (deepest cells held).
+      const prevBest = best;
+      const record = prevBest == null || held > prevBest;
+      setIsRecord(record);
+      if (record) {
+        setBest(held);
+        try {
+          window.localStorage.setItem(bestKey, String(held));
+        } catch {
+          /* storage unavailable — best stays in-memory for this session */
+        }
+      }
 
       if (didWin) {
         haptics.win();
@@ -184,13 +257,11 @@ export function Vault({
         score,
         timeMs,
         moves: cleared,
-        shareText: `BrainTap · Memory Vault\nReached round ${reach} (${held} cells held)\n\n${
-          "🟦".repeat(Math.min(cleared, 10)) || "—"
-        }\nbraintap.app/games`,
+        shareText: vaultShareText(reach, held, cleared),
         detail: { reach, held, won: didWin, grid },
       });
     },
-    [onComplete, schedule, maxRounds, initialLevel, grid],
+    [onComplete, schedule, maxRounds, initialLevel, grid, best, bestKey],
   );
 
   const startRound = useCallback(() => {
@@ -278,8 +349,18 @@ export function Vault({
     <div className="flex w-full flex-col items-center">
       {/* Status header: round + progress dots */}
       <div className="mb-2.5 flex w-full max-w-[420px] items-center justify-between font-mono text-[10.5px] tracking-[0.12em]">
-        <span style={{ color: ACCENT.soft }}>
-          ROUND {Math.min(round, maxRounds)}/{maxRounds} · {level} CELLS
+        <span className="flex items-center gap-2" style={{ color: ACCENT.soft }}>
+          <span>
+            ROUND {Math.min(round, maxRounds)}/{maxRounds} · {level} CELLS
+          </span>
+          {best != null && (
+            <span
+              className="text-ink-faint"
+              aria-label={`Personal best: ${best} cells held`}
+            >
+              · BEST {best}
+            </span>
+          )}
         </span>
         <span
           className="flex items-center gap-[5px]"
@@ -324,7 +405,7 @@ export function Vault({
       >
         {phase === "show" && !reducedMotion && (
           <div
-            key={round}
+            key={`${attempt}:${round}`}
             className="h-full origin-left"
             style={{
               background: `linear-gradient(90deg, ${ACCENT.from}, ${ACCENT.to})`,
@@ -338,12 +419,22 @@ export function Vault({
       {/* Grid */}
       <div
         className={cn(
-          "grid w-full max-w-[min(92vw,420px)] gap-[2.2vw] sm:gap-[9px]",
+          // Smaller gap when the board is large (hard 6×6) so cells stay square
+          // and tappable on ~320px phones; roomier gap on the 4×4 / 5×5 tiers.
+          "grid w-full max-w-[min(92vw,420px)]",
+          grid >= 6 ? "gap-[1.4vw] sm:gap-[7px]" : "gap-[2.2vw] sm:gap-[9px]",
           shake && !reducedMotion && "animate-shake",
         )}
         style={{ gridTemplateColumns: `repeat(${grid}, 1fr)` }}
         role="grid"
-        aria-label="Memory vault grid"
+        aria-label={
+          phase === "show"
+            ? "Memory vault grid — memorize the lit cells"
+            : phase === "input"
+              ? "Memory vault grid — tap the cells you saw"
+              : "Memory vault grid"
+        }
+        aria-disabled={phase !== "input" || ended}
       >
         {Array.from({ length: cells }, (_, i) => {
           const r = Math.floor(i / grid);
@@ -369,20 +460,42 @@ export function Vault({
           }
 
           const lifted = state === "show" || state === "good" || state === "bad";
+          // Dim the empty cells while the board is non-interactive (memorize /
+          // idle / over) so the disabled state reads clearly and lit cells pop.
+          const dimmed = !interactive && state === "off";
+          // Non-color cue: lit / picked / bad cells carry an inner marker so the
+          // pattern is legible without colour vision (A11Y fix).
+          const marker =
+            state === "show"
+              ? "ring"
+              : state === "good"
+                ? "dot"
+                : state === "bad"
+                  ? "cross"
+                  : null;
+
+          // Describe the cell's state to screen readers, including "lit" during
+          // the memorize phase so the pattern is conveyed without colour.
+          const stateLabel =
+            state === "show"
+              ? ", lit — memorize"
+              : state === "good"
+                ? ", selected"
+                : state === "bad"
+                  ? ", wrong"
+                  : "";
 
           return (
             <button
               key={i}
               type="button"
               role="gridcell"
-              aria-label={`Row ${r + 1} column ${c + 1}${
-                state === "good" ? ", selected" : ""
-              }`}
+              aria-label={`Row ${r + 1} column ${c + 1}${stateLabel}`}
               aria-selected={state === "good"}
               disabled={!interactive}
               onClick={() => pick(i)}
               className={cn(
-                "aspect-square min-h-[44px] rounded-[11px] border outline-none",
+                "relative flex aspect-square items-center justify-center rounded-[11px] border outline-none",
                 reducedMotion ? "" : "transition-all duration-150 ease-out",
                 interactive && "active:scale-90",
                 interactive &&
@@ -392,13 +505,46 @@ export function Vault({
                 background: bg,
                 borderColor: border,
                 boxShadow: shadow,
+                opacity: dimmed ? 0.5 : 1,
                 transform:
                   lifted && !reducedMotion ? "scale(1.04)" : undefined,
                 cursor: interactive ? "pointer" : "default",
                 // @ts-expect-error -- CSS var consumed by ring utility
                 "--tw-ring-color": `${ACCENT.solid}cc`,
               }}
-            />
+            >
+              {marker === "ring" && (
+                <span
+                  aria-hidden="true"
+                  className="block rounded-full border-[2.5px]"
+                  style={{
+                    width: "38%",
+                    height: "38%",
+                    borderColor: "rgba(4,6,15,0.55)",
+                  }}
+                />
+              )}
+              {marker === "dot" && (
+                <span
+                  aria-hidden="true"
+                  className="block rounded-full"
+                  style={{
+                    width: "30%",
+                    height: "30%",
+                    background: "rgba(4,6,15,0.6)",
+                  }}
+                />
+              )}
+              {marker === "cross" && (
+                <span
+                  aria-hidden="true"
+                  className="font-display font-bold leading-none"
+                  style={{ color: "rgba(4,6,15,0.7)", fontSize: "min(5vw,22px)" }}
+                >
+                  ×
+                </span>
+              )}
+            </button>
           );
         })}
       </div>
@@ -440,14 +586,36 @@ export function Vault({
       )}
 
       {ended && (
-        <button
-          type="button"
-          onClick={() => setShowModal(true)}
-          className="mt-6 rounded-pill border border-line-strong px-6 py-2.5 font-display text-[13.5px] text-[#eaf1ff] transition-transform active:scale-95"
-          style={{ background: "rgba(255,255,255,0.04)" }}
-        >
-          View result
-        </button>
+        <div className="mt-6 flex items-center gap-2.5">
+          {/* Instant retry of the same tier — the core retention hook for a
+              short memory game. */}
+          <button
+            type="button"
+            onClick={resetRun}
+            aria-label="Try again — replay this tier from round 1"
+            className={cn(
+              "rounded-pill px-6 py-2.5 font-display text-[13.5px] font-semibold text-[#04060f]",
+              reducedMotion ? "" : "transition-transform active:scale-95",
+            )}
+            style={{
+              backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`,
+              boxShadow: `0 8px 24px -8px ${ACCENT.solid}99`,
+            }}
+          >
+            ↻ Try again
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowModal(true)}
+            className={cn(
+              "rounded-pill border border-line-strong px-6 py-2.5 font-display text-[13.5px] text-[#eaf1ff]",
+              reducedMotion ? "" : "transition-transform active:scale-95",
+            )}
+            style={{ background: "rgba(255,255,255,0.04)" }}
+          >
+            View result
+          </button>
+        </div>
       )}
 
       <CompletionModal
@@ -457,12 +625,18 @@ export function Vault({
         won={won}
         eyebrow="VAULT MASTERED"
         title={won ? "Vault mastered." : "Sequence broken."}
-        statValue={`Round ${won ? maxRounds + 1 : round}`}
-        statLabel={`${won ? levelForRound(maxRounds, initialLevel) : Math.max(0, level - 1)} CELLS HELD`}
+        statValue={`Round ${result?.reach ?? round}`}
+        statLabel={`${result?.held ?? 0} CELLS HELD${
+          isRecord ? " · NEW BEST" : best != null ? ` · BEST ${best}` : ""
+        }`}
         insight={INSIGHT}
-        share={`BrainTap · Memory Vault\nReached round ${won ? maxRounds + 1 : round} (${
-          won ? levelForRound(maxRounds, initialLevel) : Math.max(0, level - 1)
-        } cells held)\n\n${"🟦".repeat(Math.min(won ? maxRounds : round - 1, 10)) || "—"}\nbraintap.app/games`}
+        share={vaultShareText(
+          result?.reach ?? round,
+          result?.held ?? 0,
+          won ? maxRounds : Math.max(0, round - 1),
+        )}
+        onReplay={resetRun}
+        replayLabel={won ? "Play again" : "Try again"}
       />
 
       {!reducedMotion && (

@@ -77,9 +77,28 @@ export function Crossword({
   const [solving, setSolving] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [revealCell, setRevealCell] = useState<number | null>(null);
+  /** Cells force-flashed as wrong after a failed full-grid submit. */
+  const [flashWrong, setFlashWrong] = useState<Set<number>>(() => new Set());
+  /** Cells popped when their run was just completed correctly. */
+  const [poppedCells, setPoppedCells] = useState<Set<number>>(() => new Set());
+  const [toast, setToast] = useState<string | null>(null);
 
   const mistakesRef = useRef(0);
   const finalMsRef = useRef(saved?.won ? (saved?.elapsedMs ?? 0) : 0);
+  const cellRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const focusFromKeyRef = useRef(false);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      if (popTimer.current) clearTimeout(popTimer.current);
+    },
+    [],
+  );
 
   const clock = useGameClock(!won, saved?.elapsedMs ?? 0);
 
@@ -119,6 +138,14 @@ export function Crossword({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [letters, won, hintsUsed, hintCells, selected, orient]);
+
+  // Roving focus: when selection moves via keyboard/arrow/tab, move DOM focus to
+  // the newly selected cell so the caret and accessibility focus stay in sync.
+  useEffect(() => {
+    if (!focusFromKeyRef.current) return;
+    focusFromKeyRef.current = false;
+    if (selected != null) cellRefs.current[selected]?.focus();
+  }, [selected]);
 
   // --- completion -----------------------------------------------------------
 
@@ -167,13 +194,28 @@ export function Crossword({
         mistakesRef.current += 1;
         haptics.error();
         sfx.wrong();
+        // Surface exactly which cells are off so a full-grid miss is never opaque.
+        const bad = new Set<number>();
+        for (let i = 0; i < cellCount; i++) {
+          if (!block[i] && next[i] !== "" && next[i] !== solution[i]) bad.add(i);
+        }
+        setFlashWrong(bad);
+        if (flashTimer.current) clearTimeout(flashTimer.current);
+        flashTimer.current = setTimeout(() => setFlashWrong(new Set()), 900);
+        setToast(
+          checking
+            ? "Some letters are off — highlighted in pink."
+            : "Some letters are off — tap Check to review.",
+        );
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToast(null), 2400);
         if (!reducedMotion) {
           setShake(true);
           setTimeout(() => setShake(false), 480);
         }
       }
     },
-    [block, cellCount, solution, finish, reducedMotion],
+    [block, cellCount, solution, finish, reducedMotion, checking],
   );
 
   // --- caret movement -------------------------------------------------------
@@ -218,38 +260,78 @@ export function Crossword({
         return;
       }
       const target = selected;
+      const runCells = activeEntry?.cells;
       setLetters((prev) => {
         const nextArr = prev.slice();
         nextArr[target] = L;
-        sfx.place();
-        haptics.success();
+        // Detect: did this keystroke just complete the active run correctly?
+        let runJustSolved = false;
+        if (runCells) {
+          runJustSolved = runCells.every((c) => nextArr[c] === solution[c]);
+        }
+        if (runJustSolved) {
+          sfx.correct();
+          haptics.win();
+          if (!reducedMotion && runCells) {
+            const popped = new Set(runCells);
+            setPoppedCells(popped);
+            if (popTimer.current) clearTimeout(popTimer.current);
+            popTimer.current = setTimeout(() => setPoppedCells(new Set()), 360);
+          }
+        } else {
+          sfx.place();
+          haptics.success();
+        }
         queueMicrotask(() => tryComplete(nextArr));
         return nextArr;
       });
       advance(target);
     },
-    [won, selected, block, hintCells, advance, tryComplete],
+    [won, selected, block, hintCells, advance, tryComplete, activeEntry, solution, reducedMotion],
   );
 
   const backspace = useCallback(() => {
     if (won || selected == null || block[selected]) return;
-    if (hintCells.has(selected)) return;
+    // On a hint-locked cell, backspace can't clear — but the caret should still
+    // retreat to the nearest editable cell so the control never feels dead.
+    if (hintCells.has(selected)) {
+      if (activeEntry) {
+        const cells = activeEntry.cells;
+        const pos = cells.indexOf(selected);
+        for (let k = pos - 1; k >= 0; k--) {
+          if (!block[cells[k]] && !hintCells.has(cells[k])) {
+            setSelected(cells[k]);
+            break;
+          }
+        }
+      }
+      sfx.tap();
+      haptics.tap();
+      return;
+    }
     setLetters((prev) => {
       const nextArr = prev.slice();
       if (nextArr[selected] !== "") {
         // Clear current cell.
         nextArr[selected] = "";
       } else if (activeEntry) {
-        // Step back to the previous cell in the run and clear it.
+        // Step back to the previous EDITABLE cell in the run. Skip hint-locked
+        // cells but keep moving the caret past them so it lands on something
+        // the player can actually edit (clearing the first editable one).
         const cells = activeEntry.cells;
         const pos = cells.indexOf(selected);
+        let moved = false;
         for (let k = pos - 1; k >= 0; k--) {
           if (!hintCells.has(cells[k])) {
             nextArr[cells[k]] = "";
             setSelected(cells[k]);
+            moved = true;
             break;
           }
         }
+        // If every earlier cell is hint-locked, at least move the caret onto the
+        // previous cell so focus tracks visibly (no silent dead key).
+        if (!moved && pos > 0) setSelected(cells[pos - 1]);
       }
       return nextArr;
     });
@@ -353,16 +435,47 @@ export function Crossword({
     [size, block, firstWhite],
   );
 
+  // --- replay (reset the same puzzle) --------------------------------------
+
+  const reset = useCallback(() => {
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    if (popTimer.current) clearTimeout(popTimer.current);
+    setShowModal(false);
+    setLetters(new Array(cellCount).fill(""));
+    setSelected(firstWhite >= 0 ? firstWhite : null);
+    setOrient("across");
+    setHintsUsed(0);
+    setHintCells(new Set());
+    setChecking(false);
+    setShake(false);
+    setSolving(false);
+    setRevealCell(null);
+    setFlashWrong(new Set());
+    setPoppedCells(new Set());
+    setToast(null);
+    mistakesRef.current = 0;
+    finalMsRef.current = 0;
+    clock.reset(0);
+    clock.start();
+    setWon(false);
+  }, [cellCount, firstWhite, clock]);
+
   // --- physical keyboard ----------------------------------------------------
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (won) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // After a win the grid is read-only: navigation/orientation still work so
+      // the solved board can be reviewed, but typing/erasing is suppressed.
       if (/^[a-zA-Z]$/.test(e.key)) {
+        if (won) return;
+        focusFromKeyRef.current = true;
         typeLetter(e.key);
         e.preventDefault();
       } else if (e.key === "Backspace" || e.key === "Delete") {
+        if (won) return;
+        focusFromKeyRef.current = true;
         backspace();
         e.preventDefault();
       } else if (e.key === " ") {
@@ -370,11 +483,12 @@ export function Crossword({
           setOrient((o) => (o === "across" ? "down" : "across"));
         }
         e.preventDefault();
-      } else if (e.key === "ArrowUp") (moveArrow(-1, 0), e.preventDefault());
-      else if (e.key === "ArrowDown") (moveArrow(1, 0), e.preventDefault());
-      else if (e.key === "ArrowLeft") (moveArrow(0, -1), e.preventDefault());
-      else if (e.key === "ArrowRight") (moveArrow(0, 1), e.preventDefault());
+      } else if (e.key === "ArrowUp") (focusFromKeyRef.current = true, moveArrow(-1, 0), e.preventDefault());
+      else if (e.key === "ArrowDown") (focusFromKeyRef.current = true, moveArrow(1, 0), e.preventDefault());
+      else if (e.key === "ArrowLeft") (focusFromKeyRef.current = true, moveArrow(0, -1), e.preventDefault());
+      else if (e.key === "ArrowRight") (focusFromKeyRef.current = true, moveArrow(0, 1), e.preventDefault());
       else if (e.key === "Tab") {
+        focusFromKeyRef.current = true;
         stepEntry(e.shiftKey ? -1 : 1);
         e.preventDefault();
       }
@@ -460,92 +574,130 @@ export function Crossword({
         role="grid"
         aria-label={`Crossword grid, ${size} by ${size}`}
       >
-        {Array.from({ length: cellCount }, (_, i) => {
-          const r = rowOf(i, size);
-          const c = colOf(i, size);
-          const isBlock = block[i];
-          const num = numbers[i];
+        {Array.from({ length: size }, (_, r) => (
+          <div
+            key={`row-${r}`}
+            role="row"
+            aria-rowindex={r + 1}
+            style={{ display: "contents" }}
+          >
+            {Array.from({ length: size }, (_, c) => {
+              const i = cellAt(r, c, size);
+              const isBlock = block[i];
+              const num = numbers[i];
 
-          if (isBlock) {
-            return (
-              <div
-                key={i}
-                role="presentation"
-                aria-hidden
-                style={{
-                  background: "rgba(4,7,16,0.92)",
-                  borderRight: c === size - 1 ? "none" : "1px solid rgba(255,255,255,0.05)",
-                  borderBottom: r === size - 1 ? "none" : "1px solid rgba(255,255,255,0.05)",
-                }}
-              />
-            );
-          }
+              if (isBlock) {
+                return (
+                  <div
+                    key={i}
+                    role="presentation"
+                    aria-hidden
+                    style={{
+                      background: "rgba(4,7,16,0.92)",
+                      borderRight: c === size - 1 ? "none" : "1px solid rgba(255,255,255,0.05)",
+                      borderBottom: r === size - 1 ? "none" : "1px solid rgba(255,255,255,0.05)",
+                    }}
+                  />
+                );
+              }
 
-          const value = letters[i];
-          const isSel = selected === i;
-          const inActive = activeCells.has(i);
-          const isHint = hintCells.has(i);
-          const wrong = checking && value !== "" && value !== solution[i] && !isHint;
-          const revealDelay = solving && !reducedMotion ? (r + c) * 30 : 0;
+              const value = letters[i];
+              const isSel = selected === i;
+              const inActive = activeCells.has(i);
+              const isHint = hintCells.has(i);
+              const checkWrong = checking && value !== "" && value !== solution[i] && !isHint;
+              const flashed = flashWrong.has(i);
+              const wrong = checkWrong || flashed;
+              const popped = poppedCells.has(i);
+              const revealDelay = solving && !reducedMotion ? (r + c) * 30 : 0;
 
-          let bg = `${ACCENT.solid}12`;
-          if (inActive) bg = `${ACCENT.solid}1f`;
-          if (isSel) bg = `${ACCENT.solid}40`;
-          if (isHint && !isSel) bg = `${ACCENT.solid}26`;
-          if (wrong) bg = "rgba(255,107,157,0.18)";
+              let bg = `${ACCENT.solid}12`;
+              if (inActive) bg = `${ACCENT.solid}1f`;
+              if (isSel) bg = `${ACCENT.solid}40`;
+              if (isHint && !isSel) bg = `${ACCENT.solid}26`;
+              if (wrong) bg = "rgba(255,107,157,0.18)";
 
-          const color = wrong ? WRONG : isHint ? ACCENT.soft : "#eafcff";
+              const color = wrong ? WRONG : isHint ? ACCENT.soft : "#eafcff";
 
-          const entryNum = activeEntry?.num;
-          const dirWord = activeEntry?.dir;
+              const entryNum = activeEntry?.num;
+              const dirWord = activeEntry?.dir;
 
-          return (
-            <button
-              key={i}
-              type="button"
-              role="gridcell"
-              aria-label={`Row ${r + 1} column ${c + 1}${value ? `, letter ${value}` : ", empty"}${num ? `, clue ${num}` : ""}${inActive && dirWord ? `, ${entryNum} ${dirWord}` : ""}${isHint ? ", revealed by hint" : ""}${wrong ? ", incorrect" : ""}`}
-              aria-selected={isSel}
-              disabled={won}
-              onClick={() => selectCell(i)}
-              className={cn(
-                "relative flex touch-manipulation select-none items-center justify-center font-display outline-none",
-                !reducedMotion && "transition-[background-color,color] duration-150",
-                wrong && "ring-2 ring-inset ring-[#ff6b9d]",
-              )}
-              style={{
-                background: bg,
-                color,
-                fontWeight: 600,
-                fontSize: "clamp(16px, 6vw, 26px)",
-                animation:
-                  solving && !reducedMotion
-                    ? `btSolve 0.5s ease ${revealDelay}ms both`
-                    : revealCell === i && !reducedMotion
-                      ? "btPop 0.32s ease both"
-                      : undefined,
-                boxShadow: isSel ? `inset 0 0 0 2px ${ACCENT.solid}` : undefined,
-                borderRight: c === size - 1 ? "none" : `1px solid ${ACCENT.solid}22`,
-                borderBottom: r === size - 1 ? "none" : `1px solid ${ACCENT.solid}22`,
-              }}
-            >
-              {num > 0 && (
-                <span
-                  className="pointer-events-none absolute left-[2px] top-[1px] font-mono leading-none"
-                  style={{
-                    fontSize: "clamp(7px, 2.1vw, 10px)",
-                    color: isSel ? "#04060f" : "rgba(226,234,255,0.55)",
+              // Roving tabindex: only the selected cell is in the tab order.
+              const tabIndex = isSel ? 0 : -1;
+
+              return (
+                <button
+                  key={i}
+                  ref={(el) => {
+                    cellRefs.current[i] = el;
                   }}
-                  aria-hidden
+                  type="button"
+                  role="gridcell"
+                  aria-colindex={c + 1}
+                  aria-label={`Row ${r + 1} column ${c + 1}${value ? `, letter ${value}` : ", empty"}${num ? `, clue ${num}` : ""}${inActive && dirWord ? `, ${entryNum} ${dirWord}` : ""}${isHint ? ", revealed by hint" : ""}${wrong ? ", incorrect" : ""}`}
+                  aria-selected={isSel}
+                  tabIndex={tabIndex}
+                  onClick={() => selectCell(i)}
+                  className={cn(
+                    "relative flex touch-manipulation select-none items-center justify-center font-display outline-none",
+                    !reducedMotion && "transition-[background-color,color] duration-150",
+                    wrong && "ring-2 ring-inset ring-[#ff6b9d]",
+                  )}
+                  style={{
+                    background: bg,
+                    color,
+                    fontWeight: 600,
+                    fontSize: "clamp(16px, 6vw, 26px)",
+                    animation:
+                      solving && !reducedMotion
+                        ? `btSolve 0.5s ease ${revealDelay}ms both`
+                        : (revealCell === i || popped) && !reducedMotion
+                          ? "btPop 0.32s ease both"
+                          : undefined,
+                    boxShadow: isSel ? `inset 0 0 0 2px ${ACCENT.solid}` : undefined,
+                    borderRight: c === size - 1 ? "none" : `1px solid ${ACCENT.solid}22`,
+                    borderBottom: r === size - 1 ? "none" : `1px solid ${ACCENT.solid}22`,
+                  }}
                 >
-                  {num}
-                </span>
-              )}
-              {value}
-            </button>
-          );
-        })}
+                  {num > 0 && (
+                    <span
+                      className="pointer-events-none absolute left-[2px] top-[1px] font-mono leading-none"
+                      style={{
+                        fontSize: "clamp(7px, 2.1vw, 10px)",
+                        color: isSel ? "#04060f" : "rgba(226,234,255,0.55)",
+                      }}
+                      aria-hidden
+                    >
+                      {num}
+                    </span>
+                  )}
+                  {value}
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </div>
+
+      {/* transient toast for failed full-grid submits */}
+      {toast && (
+        <p
+          role="status"
+          aria-live="polite"
+          className={cn(
+            "mt-3 w-full rounded-xl border px-3 py-2 text-center font-display text-[12.5px]",
+            !reducedMotion && "animate-rise",
+          )}
+          style={{
+            maxWidth: gridMax,
+            color: WRONG,
+            borderColor: "rgba(255,107,157,0.4)",
+            background: "rgba(255,107,157,0.1)",
+          }}
+        >
+          {toast}
+        </p>
+      )}
 
       {/* active clue strip */}
       <div
@@ -555,7 +707,7 @@ export function Crossword({
         <button
           type="button"
           onClick={() => stepEntry(-1)}
-          disabled={won || entries.length === 0}
+          disabled={entries.length === 0}
           aria-label="Previous clue"
           className="flex min-h-[48px] w-11 shrink-0 items-center justify-center rounded-xl border font-display text-lg disabled:opacity-40"
           style={{ borderColor: `${ACCENT.solid}33`, background: `${ACCENT.solid}12`, color: ACCENT.soft }}
@@ -569,7 +721,6 @@ export function Crossword({
               setOrient((o) => (o === "across" ? "down" : "across"));
             }
           }}
-          disabled={won}
           aria-label="Active clue. Tap to toggle across or down."
           className="flex min-h-[48px] flex-1 flex-col justify-center rounded-xl border px-3 py-1.5 text-left"
           style={{ borderColor: `${ACCENT.solid}33`, background: `${ACCENT.solid}12` }}
@@ -593,7 +744,7 @@ export function Crossword({
         <button
           type="button"
           onClick={() => stepEntry(1)}
-          disabled={won || entries.length === 0}
+          disabled={entries.length === 0}
           aria-label="Next clue"
           className="flex min-h-[48px] w-11 shrink-0 items-center justify-center rounded-xl border font-display text-lg disabled:opacity-40"
           style={{ borderColor: `${ACCENT.solid}33`, background: `${ACCENT.solid}12`, color: ACCENT.soft }}
@@ -706,6 +857,8 @@ export function Crossword({
         statLabel="SOLVE TIME"
         insight={GAME_METAS.crossword.insight}
         share={shareLine(finalMsRef.current, size)}
+        onReplay={reset}
+        replayLabel="Play again"
       />
     </div>
   );

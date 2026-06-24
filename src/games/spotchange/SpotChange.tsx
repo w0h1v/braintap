@@ -26,6 +26,24 @@ const BAD = "#ff5a7c";
 
 type Phase = "idle" | "show" | "blank" | "test" | "resolved" | "over";
 
+// Per-round input window (presentation-only, never seeded). The TEST phase
+// auto-resolves as a miss when this elapses, giving the game a real lose beat
+// and per-round pressure. Generous so it tests recall, not twitch speed; a
+// reduced-motion floor keeps it comfortable.
+const INPUT_MS = 6000;
+const INPUT_MS_REDUCED = 9000;
+
+/** Longest run of consecutive correct answers in a result list. */
+function bestStreak(results: readonly boolean[]): number {
+  let best = 0;
+  let cur = 0;
+  for (const r of results) {
+    cur = r ? cur + 1 : 0;
+    if (cur > best) best = cur;
+  }
+  return best;
+}
+
 interface SpotChangeState {
   /** Per-round correctness results recorded so far. */
   results: boolean[];
@@ -66,9 +84,13 @@ export function SpotChange({
   const [showModal, setShowModal] = useState(false);
   const [shake, setShake] = useState(false);
   const [focusIdx, setFocusIdx] = useState(0);
+  // Whether the current resolve was a timeout (no tap) vs. a wrong tap.
+  const [timedOut, setTimedOut] = useState(false);
 
   const completedRef = useRef(false);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  // The per-round input deadline timer (so a tap can cancel it).
+  const inputTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Timing: accumulate TEST-phase wall clock (Date.now is allowed in the
   // component; the prohibition is engine/generator only).
   const startedAtRef = useRef<number | null>(null);
@@ -83,6 +105,8 @@ export function SpotChange({
   const roundIdx = Math.min(results.length, totalRounds - 1);
   const round = rounds[roundIdx];
   const correct = results.filter(Boolean).length;
+  const inputMs = reducedMotion ? INPUT_MS_REDUCED : INPUT_MS;
+  const streakBest = bestStreak(results);
 
   const schedule = useCallback((fn: () => void, ms: number) => {
     const t = setTimeout(fn, ms);
@@ -115,6 +139,11 @@ export function SpotChange({
     setShowModal(false);
     setShake(false);
     setFocusIdx(0);
+    setTimedOut(false);
+    if (inputTimerRef.current) {
+      clearTimeout(inputTimerRef.current);
+      inputTimerRef.current = null;
+    }
   }, [tierSig]);
 
   // Persist resumable progress (results + end status + timing + tier guard).
@@ -140,6 +169,14 @@ export function SpotChange({
       // runs; it never pushes a non-perfect run to 100.
       const base = scoreRun(finalResults);
       const score = perfect ? 100 : base;
+      // Completing the full run UNLOCKS the next tier — gating on completion,
+      // not perfection (a fixed-trial accuracy game should never soft-lock
+      // progression behind a flawless run). Accuracy still drives the score and
+      // rank, so there's a number to chase without a hard wall.
+      const status = "won" as const;
+      // Graded celebration: full confetti + win jingle only for a perfect run;
+      // a strong-but-imperfect run still gets a light, encouraging beat.
+      const strong = !perfect && base >= 60;
 
       setEnded(true);
       setPhase("over");
@@ -147,6 +184,9 @@ export function SpotChange({
       if (perfect) {
         haptics.win();
         sfx.win();
+      } else if (strong) {
+        haptics.success();
+        sfx.correct();
       }
 
       schedule(() => setShowModal(true), perfect ? 420 : 300);
@@ -155,51 +195,46 @@ export function SpotChange({
         "🟩".repeat(correctCount) + "⬛".repeat(finalResults.length - correctCount);
 
       onComplete({
-        status: perfect ? "won" : "played",
+        // `status: "won"` is the progression-unlock signal (granted on
+        // completion, not perfection). `score` stays accuracy-based, so rank
+        // still reflects how well the run went.
+        status,
         score,
         timeMs,
         mistakes: finalResults.length - correctCount,
         shareText: `BrainTap · Spot the Change\n${correctCount}/${finalResults.length} changes spotted\n\n${grid_emoji}\nbraintap.app/games`,
-        detail: { correct: correctCount, total: finalResults.length, perfect, grid },
+        detail: {
+          correct: correctCount,
+          total: finalResults.length,
+          perfect,
+          streak: bestStreak(finalResults),
+          grid,
+        },
       });
     },
     [onComplete, schedule, grid],
   );
 
-  // Begin a round: SHOW → (timer) → BLANK → (timer) → TEST.
-  const startRound = useCallback(() => {
-    if (ended) return;
-    setChosen(null);
-    setWasCorrect(false);
-    setPhase("show");
-
-    const flash = reducedMotion ? Math.max(flashMs, REDUCED_MOTION_FLASH_FLOOR) : flashMs;
-    const blank = reducedMotion ? BLANK_MS_REDUCED : BLANK_MS;
-
-    schedule(() => {
-      setPhase("blank");
-      schedule(() => {
-        setPhase("test");
-        setFocusIdx(0);
-        startedAtRef.current = Date.now();
-      }, blank);
-    }, flash);
-  }, [ended, flashMs, reducedMotion, schedule]);
-
-  // Handle a tap/selection on a cell during the TEST phase.
-  const pick = useCallback(
-    (cell: number) => {
+  // Resolve the current TEST round. `cell === null` means the input window
+  // elapsed with no answer (a timeout miss); otherwise it's the tapped cell.
+  const resolveRound = useCallback(
+    (cell: number | null) => {
       if (phase !== "test" || ended) return;
+      // Stop the per-round deadline timer the moment the round resolves.
+      if (inputTimerRef.current) {
+        clearTimeout(inputTimerRef.current);
+        inputTimerRef.current = null;
+      }
       // Bank this round's input time.
       if (startedAtRef.current != null) {
         elapsedRef.current += Date.now() - startedAtRef.current;
         startedAtRef.current = null;
       }
 
-      const outcome = evaluateTap(round, cell);
-      const isCorrect = outcome === "correct";
+      const isCorrect = cell != null && evaluateTap(round, cell) === "correct";
       setChosen(cell);
       setWasCorrect(isCorrect);
+      setTimedOut(cell == null);
       setPhase("resolved");
 
       if (isCorrect) {
@@ -223,6 +258,60 @@ export function SpotChange({
     },
     [phase, ended, round, results, totalRounds, reducedMotion, schedule, finish],
   );
+
+  // Begin a round: SHOW → (timer) → BLANK → (timer) → TEST → (deadline) → miss.
+  const startRound = useCallback(() => {
+    if (ended) return;
+    setChosen(null);
+    setWasCorrect(false);
+    setTimedOut(false);
+    setPhase("show");
+
+    const flash = reducedMotion ? Math.max(flashMs, REDUCED_MOTION_FLASH_FLOOR) : flashMs;
+    const blank = reducedMotion ? BLANK_MS_REDUCED : BLANK_MS;
+
+    schedule(() => {
+      setPhase("blank");
+      schedule(() => {
+        setPhase("test");
+        setFocusIdx(0);
+        startedAtRef.current = Date.now();
+        // Arm the per-round input deadline: no answer in time is a miss.
+        inputTimerRef.current = setTimeout(() => {
+          inputTimerRef.current = null;
+          resolveRound(null);
+        }, inputMs);
+        timersRef.current.push(inputTimerRef.current);
+      }, blank);
+    }, flash);
+  }, [ended, flashMs, reducedMotion, schedule, inputMs, resolveRound]);
+
+  // Handle a tap/selection on a cell during the TEST phase.
+  const pick = useCallback((cell: number) => resolveRound(cell), [resolveRound]);
+
+  // Reset the current tier to a fresh run so the player can replay. Clears the
+  // completion guard, results, timing and modal so a new full run can be
+  // scored from scratch (the unlock has already been granted on completion).
+  const replay = useCallback(() => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    if (inputTimerRef.current) {
+      clearTimeout(inputTimerRef.current);
+      inputTimerRef.current = null;
+    }
+    completedRef.current = false;
+    startedAtRef.current = null;
+    elapsedRef.current = 0;
+    setResults([]);
+    setPhase("idle");
+    setChosen(null);
+    setWasCorrect(false);
+    setTimedOut(false);
+    setEnded(false);
+    setShowModal(false);
+    setShake(false);
+    setFocusIdx(0);
+  }, []);
 
   // Keyboard navigation during the TEST phase (mirror sudoku's move()).
   const onKeyDown = useCallback(
@@ -249,15 +338,23 @@ export function SpotChange({
 
   // What colour index each cell shows in the current phase.
   const displayGrid = useMemo<number[] | null>(() => {
-    if (phase === "show" || phase === "idle" || phase === "resolved" || phase === "over") {
-      return phase === "show" ? round.base : null;
+    if (phase === "show") return round.base;
+    // TEST, RESOLVED and OVER all show the swapped (test) grid so the changed
+    // cell stays visible — the board is reviewable on the end screen instead of
+    // being blanked, and a resolved round keeps its colours to learn from.
+    if (phase === "test" || phase === "resolved" || phase === "over") {
+      return testGrid(round);
     }
-    if (phase === "test") return testGrid(round);
-    return null; // blank → masked
+    return null; // idle / blank → masked (never paints base mid-run)
   }, [phase, round]);
 
   const perfectSoFar = ended && correct === totalRounds;
   const isLastRound = results.length >= totalRounds;
+  // A run resumed from saved state mid-way: idle, but rounds already played and
+  // not yet ended. The board is masked (idle) so we offer a clear resume CTA
+  // instead of stranding the player on an empty grid.
+  const isMidRunResume =
+    phase === "idle" && !ended && results.length > 0 && results.length < totalRounds;
 
   const message =
     phase === "show"
@@ -269,29 +366,47 @@ export function SpotChange({
           : phase === "resolved"
             ? wasCorrect
               ? "Spotted it ✓"
-              : "Missed — the highlighted cell changed."
+              : timedOut
+                ? "Out of time — the highlighted cell changed."
+                : "Missed — the highlighted cell changed."
             : phase === "over"
               ? perfectSoFar
                 ? "Every change spotted ✓"
                 : `${correct}/${totalRounds} changes spotted`
               : ended
                 ? "Run complete"
-                : "Memorize the grid, then spot the one cell that changed.";
+                : isMidRunResume
+                  ? `Resume your run — round ${results.length + 1} of ${totalRounds}.`
+                  : "Memorize the grid, then spot the one cell that changed.";
 
   const primaryLabel =
     phase === "idle" && results.length === 0
       ? "Start round"
-      : phase === "resolved" && !isLastRound
-        ? "Next round"
-        : null;
+      : isMidRunResume
+        ? `Resume · round ${results.length + 1}`
+        : phase === "resolved" && !isLastRound
+          ? "Next round"
+          : null;
   const showPrimary = (phase === "idle" || phase === "resolved") && !ended && primaryLabel;
 
   return (
     <div className="flex w-full flex-col items-center">
       {/* Status header: round + score chips */}
       <div className="mb-2.5 flex w-full max-w-[420px] items-center justify-between font-mono text-[10.5px] tracking-[0.12em]">
-        <span style={{ color: ACCENT.soft }}>
-          ROUND {Math.min(results.length + (ended ? 0 : 1), totalRounds)}/{totalRounds}
+        <span className="flex items-center gap-2">
+          <span style={{ color: ACCENT.soft }}>
+            ROUND {Math.min(results.length + (ended ? 0 : 1), totalRounds)}/{totalRounds}
+          </span>
+          {/* Streak chip — a small chase number: most changes spotted in a row. */}
+          {streakBest > 0 && (
+            <span
+              className="rounded-pill px-1.5 py-[1px] font-semibold"
+              style={{ background: `${GOOD}1f`, color: GOOD }}
+              aria-label={`Best streak ${streakBest} in a row`}
+            >
+              🔥 {streakBest}
+            </span>
+          )}
         </span>
         <span
           className="flex items-center gap-[5px]"
@@ -333,7 +448,10 @@ export function SpotChange({
         {message}
       </div>
 
-      {/* SHOW-phase countdown bar (memorize-time cue). */}
+      {/* Countdown bar: memorize-time cue on SHOW, input deadline on TEST. The
+          TEST bar mirrors the per-round timer that auto-resolves as a miss, so
+          the pressure is visible. Under reducedMotion we skip the animation
+          (the timer still runs) to honour the motion preference. */}
       <div
         className="mb-3 h-[3px] w-full max-w-[min(92vw,420px)] overflow-hidden rounded-full"
         style={{ background: "rgba(255,255,255,0.06)" }}
@@ -341,12 +459,23 @@ export function SpotChange({
       >
         {phase === "show" && !reducedMotion && (
           <div
-            key={results.length}
+            key={`show-${results.length}`}
             className="h-full origin-left"
             style={{
               background: `linear-gradient(90deg, ${ACCENT.from}, ${ACCENT.to})`,
               boxShadow: `0 0 8px ${ACCENT.solid}88`,
               animation: `spotCountdown ${flashMs}ms linear forwards`,
+            }}
+          />
+        )}
+        {phase === "test" && !reducedMotion && (
+          <div
+            key={`test-${results.length}`}
+            className="h-full origin-left"
+            style={{
+              background: `linear-gradient(90deg, ${BAD}, ${ACCENT.to})`,
+              boxShadow: `0 0 8px ${BAD}88`,
+              animation: `spotCountdown ${inputMs}ms linear forwards`,
             }}
           />
         )}
@@ -488,26 +617,48 @@ export function SpotChange({
       )}
 
       {ended && (
-        <button
-          type="button"
-          onClick={() => setShowModal(true)}
-          className="mt-6 rounded-pill border border-line-strong px-6 py-2.5 font-display text-[13.5px] text-[#eaf1ff] transition-transform active:scale-95"
-          style={{ background: "rgba(255,255,255,0.04)" }}
-        >
-          View result
-        </button>
+        <div className="mt-6 flex flex-col items-center gap-2">
+          {streakBest > 0 && (
+            <p className="font-mono text-[11px] tracking-[0.08em]" style={{ color: GOOD }}>
+              🔥 Best streak: {streakBest} in a row
+            </p>
+          )}
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setShowModal(true)}
+              className="rounded-pill border border-line-strong px-6 py-2.5 font-display text-[13.5px] text-[#eaf1ff] transition-transform active:scale-95"
+              style={{ background: "rgba(255,255,255,0.04)" }}
+            >
+              View result
+            </button>
+            <button
+              type="button"
+              onClick={replay}
+              className="rounded-pill px-6 py-2.5 font-display text-[13.5px] font-semibold text-[#04060f] transition-transform active:scale-95"
+              style={{ backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})` }}
+            >
+              ↻ Play again
+            </button>
+          </div>
+        </div>
       )}
 
       <CompletionModal
         open={showModal}
         onClose={() => setShowModal(false)}
         accent={ACCENT}
-        won={perfectSoFar}
+        // A completed run reads as a win (confetti + rank reveal): unlock is on
+        // completion, and a strong non-perfect run deserves a number to chase.
+        // The eyebrow/title still distinguish a perfect run from a partial one.
+        won={ended}
         eyebrow="CHANGE DETECTED"
         title={perfectSoFar ? "Every change spotted." : `${correct}/${totalRounds} changes spotted.`}
         statValue={`${correct}/${totalRounds}`}
         statLabel="CORRECT"
         insight={INSIGHT}
+        onReplay={ended ? replay : undefined}
+        replayLabel="Play this tier again"
         share={`BrainTap · Spot the Change\n${correct}/${totalRounds} changes spotted\n\n${
           "🟩".repeat(correct) + "⬛".repeat(totalRounds - correct)
         }\nbraintap.app/games`}
