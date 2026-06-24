@@ -11,7 +11,13 @@
  *
  * Source data adapted from design_src/brainle-words.js, then expanded to satisfy
  * the >=365 bank requirement.
+ *
+ * The bulk accepted-guess dictionary (the standard Wordle allowed set) lives in
+ * ./guesses.ts and is unioned into `VALID` below so common words like AROSE are
+ * accepted as guesses without being eligible as daily answers.
  */
+
+import { EXTRA_GUESSES } from "./guesses";
 
 /** Brain/cognition-themed answers (curated, kept first; drive the hint bank). */
 export const THEMED: readonly string[] = [
@@ -282,10 +288,14 @@ export const ANSWERS: readonly string[] = (() => {
   return out;
 })();
 
-/** The full set of valid guesses (superset of the answer bank). */
+/**
+ * The full set of valid guesses (superset of the answer bank): the curated
+ * answers + the legacy EXTRA pool + the standard Wordle allowed-guess
+ * dictionary. The Set dedupes the overlap between the three sources.
+ */
 export const VALID: ReadonlySet<string> = (() => {
   const s = new Set<string>();
-  for (const w of [...ANSWERS, ...EXTRA]) {
+  for (const w of [...ANSWERS, ...EXTRA, ...EXTRA_GUESSES]) {
     if (w.length === 5 && /^[A-Z]+$/.test(w)) s.add(w);
   }
   return s;

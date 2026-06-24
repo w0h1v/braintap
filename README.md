@@ -1,6 +1,6 @@
 # BrainTap Games
 
-**Fifteen science-backed brain games, one fresh challenge every day.** Build a
+**Twenty science-backed brain games, one fresh challenge every day.** Build a
 streak, train six cognitive domains, and watch your mind sharpen. A production
 Next.js app with a deterministic daily-puzzle engine, validated level banks, and
 optional accounts + cloud sync.
@@ -12,7 +12,7 @@ optional accounts + cloud sync.
 | Game | Type | Trains | Daily content |
 |------|------|--------|---------------|
 | Neural Connections | Group 16 terms into 4 hidden categories | verbal, logic | 47-category curated pool, ambiguity-guarded |
-| Synapse Wordle | Guess the 5-letter mind word | verbal | 549-word answer bank, 1,800-word guess set |
+| Synapse Wordle | Guess the 5-letter mind word | verbal | curated answer bank, full ~12,900-word Wordle guess set |
 | Mind Strands | Themed word search + spangram | verbal, focus | 63 themes, backtracking grid packer |
 | Focus Forge | Nonogram / picross | logic, spatial | procedural, unique-solution verified |
 | Idea Weaver | Spelling-bee from 7 letters | verbal | dictionary + daily pangram hive |
@@ -26,6 +26,11 @@ optional accounts + cloud sync.
 | Sequence Echo | Simon-style recall | memory, focus | procedural prefix-stable sequence |
 | Tile Slide | 15-puzzle | spatial, logic | procedural, parity-solvable |
 | Reversi | Othello vs AI | logic, spatial | minimax AI w/ corner weighting |
+| Mini Crossword | Across/down clue grid | verbal, memory | curated mini-grid clue bank |
+| Pattern Matrix | Find the rule, complete the 3×3 | logic, spatial | procedural rule sets |
+| Stroop Rush | Tap the ink colour, not the word | focus, logic | procedural, timed |
+| Mental Math Sprint | Rapid-fire arithmetic, timed | numeric, focus | procedural, solvable |
+| Spot the Change | Memorise the grid, spot the change | memory, spatial | procedural seeded |
 
 Every daily puzzle is **deterministic** (same date → same puzzle for everyone)
 and **validated solvable** by the test suite across 200 consecutive days.

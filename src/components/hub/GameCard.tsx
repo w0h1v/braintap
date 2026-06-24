@@ -73,7 +73,7 @@ export function GameCard({
       </div>
 
       <div
-        className="mt-3.5 font-mono text-[9.5px] tracking-[0.16em]"
+        className="mt-3.5 font-mono text-[10.5px] tracking-[0.14em]"
         style={{ color: a.soft }}
       >
         {meta.category}

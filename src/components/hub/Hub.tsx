@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { ALL_GAMES, GAME_METAS, ROTATION, GAME_COUNT, GAME_COUNT_WORD } from "@/lib/games";
 import { GAME_ORDER } from "@/games/_meta";
 import { GameCard } from "./GameCard";
+import { RecommendedRail } from "./RecommendedRail";
 import { ResetCountdown } from "./ResetCountdown";
 import { StatBox } from "@/components/ui/Card";
 import { useProgress, liveStreak } from "@/lib/progress";
@@ -191,6 +192,9 @@ export function Hub() {
           )}
         </div>
       </section>
+
+      {/* what to play next — tames the 20-card grid for quick/first-time sessions */}
+      <RecommendedRail />
 
       {/* favourites (pinned at the top once the player stars a game) */}
       {favoriteGames.length > 0 && (

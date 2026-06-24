@@ -2,7 +2,7 @@
   "name": "braintap",
   "version": "1.0.0",
   "private": true,
-  "description": "BrainTap Games — fifteen science-backed brain games, one fresh challenge every day.",
+  "description": "BrainTap Games — twenty science-backed brain games, one fresh challenge every day.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

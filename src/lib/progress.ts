@@ -5,6 +5,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import type { GameId, GameResult, Difficulty } from "./types";
 import { todayISO, addDays } from "./daily";
 import { prevDifficulty } from "./difficulty";
+import { newlyUnlocked } from "./achievements";
 
 export interface Settings {
   zen: boolean;
@@ -42,6 +43,8 @@ interface ProgressState {
   lastPlayedISO: string | null;
   /** Game ids the player has starred, newest-first is not guaranteed — display in GAME_ORDER. */
   favorites: GameId[];
+  /** Earned achievement ids (monotonic — once earned, stays). Persisted. */
+  achievements: string[];
 
   // actions
   setHydrated: () => void;
@@ -89,6 +92,7 @@ export const useProgress = create<ProgressState>()(
       longestStreak: 0,
       lastPlayedISO: null,
       favorites: [],
+      achievements: [],
 
       setHydrated: () => set({ hydrated: true }),
 
@@ -147,12 +151,22 @@ export const useProgress = create<ProgressState>()(
             longestStreak = Math.max(longestStreak, currentStreak);
           }
 
+          const nextResults = { ...s.results, [dateISO]: day };
+
+          // Derive achievements from the freshly-updated snapshot and merge any
+          // newly-earned ids into the persisted set (monotonic).
+          const fresh = newlyUnlocked(
+            { results: nextResults, tierResults, longestStreak },
+            s.achievements,
+          );
+
           return {
-            results: { ...s.results, [dateISO]: day },
+            results: nextResults,
             tierResults,
             currentStreak,
             longestStreak,
             lastPlayedISO,
+            achievements: fresh.length ? [...s.achievements, ...fresh] : s.achievements,
           };
         }),
 
@@ -208,6 +222,7 @@ export const useProgress = create<ProgressState>()(
           currentStreak: 0,
           longestStreak: 0,
           lastPlayedISO: null,
+          achievements: [],
         }),
     }),
     {
@@ -224,6 +239,7 @@ export const useProgress = create<ProgressState>()(
         longestStreak: s.longestStreak,
         lastPlayedISO: s.lastPlayedISO,
         favorites: s.favorites,
+        achievements: s.achievements,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated();
