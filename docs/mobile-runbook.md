@@ -1,107 +1,93 @@
 # BrainTap — Mobile / Monetization Runbook
 
-Companion to `docs/mobile-monetization-plan.md`. The plan is the *why*; this is
-the *how* and, crucially, **what still needs a human + native toolchain** that
-could not be done or verified in the implementation environment.
+Companion to `docs/mobile-monetization-plan.md` (the *why*). This is the *how*
+and the **current state**: the native shell + both monetization bridges are
+implemented and on `main`; what remains is store/account work that needs a human.
 
-## What's already in the repo (web-inert, verified)
+The whole layer is **web-inert** — every gate checks
+`Capacitor.isNativePlatform()` / `adsAvailable()` / `billingAvailable`, all false
+on the website, so `braintap.vercel.app` behaves exactly as before.
 
-These shipped on the `feat/phase-a-mobile-polish` branch and are **completely
-inert on the web build** — the website behaves exactly as before because every
-gate checks `adsAvailable()` / `billingAvailable`, both false on web:
+## Implemented (on `main`, web-inert)
 
-- `src/lib/config.ts` — `MonetizationConfig` + defaults (free-hint threshold **2**,
-  interstitial every **3rd** transition AND ≤ once / **3 min**, `premiumUnlocksArchive: true`),
-  overridable at runtime via `setMonetizationConfig()`.
-- `src/lib/entitlement.tsx` — `EntitlementProvider` + `useEntitlement()` (web =
-  inert: `isPremium:false`, `billingAvailable:false`, no-op purchase/restore).
-  Mounted in `src/app/providers.tsx`.
-- `src/lib/ads/index.ts` — ads service: `adsAvailable()`, `showRewardedAd()`,
-  `maybeInterstitial()`. Web no-op. `NATIVE_ADS_WIRED = false` is the master switch.
-- Interstitial hooks on the three return-to-home navigations: `CompletionModal`
-  "Back to today", `GameHost` "← Today", and the post-completion
-  "Back to today's puzzles" link (`maybeInterstitial("return-home")`).
-- Rewarded-hint gate **reference implementation** in `src/games/sudoku/Sudoku.tsx`
-  (`handleHint`) — the pattern to copy to the other hint games.
-- `capacitor.config.ts` (scaffold), `next.config.mjs` env-gated static export,
-  `npm run build:mobile` script.
+- **Native iOS Capacitor shell** in `ios/` (Capacitor 7, **Swift Package
+  Manager** — no CocoaPods). `npm run build:mobile` → `out/`, then
+  `npx cap sync ios`. **Verified**: `xcodebuild ... BUILD SUCCEEDED` and the app
+  **launches in the iOS simulator**; both plugins resolve via SPM
+  (`@revenuecat/purchases-capacitor@13.2.0` → `purchases-ios 5.78.0`;
+  `@capacitor-community/admob@8.0.0` → `GoogleMobileAds 12.14.0`). `Package.resolved`
+  pins the graph. `capacitor.config.ts` is typed (`webDir: "out"`).
+- **Static export** (`scripts/build-mobile.mjs`): temporarily moves the
+  export-incompatible web-only files out (`src/middleware.ts`,
+  `src/app/auth/callback`, the four OG/Twitter image routes), runs
+  `BUILD_TARGET=mobile` (`output: "export"`), restores them. Produces a complete
+  `out/` (35 pages). The web build (`npm run build`) is unaffected. Because the
+  web OAuth callback is excluded, mobile auth must use a native deep-link flow.
+- **RevenueCat** wired in `src/lib/entitlement.tsx`: configures the SDK with the
+  per-platform public key (`NEXT_PUBLIC_REVENUECAT_IOS_KEY` / `_ANDROID_KEY`),
+  reads `CustomerInfo`, sets `isPremium` from the **`Braintap Pro`** entitlement,
+  `purchase()` buys the current offering's lifetime package, `restore()`,
+  customer-info listener, Supabase user id (`useAuth()`) as app-user-id.
+- **AdMob** wired in `src/lib/ads/index.ts`, **`NATIVE_ADS_WIRED = true`**:
+  `showRewardedAd()` resolves `"rewarded"` only on AdMob's reward callback;
+  `maybeInterstitial()` shows a return-to-home interstitial (frequency-capped).
+  Plugin dynamic-imported in native-only paths. Defaults to Google **test** ad
+  units (`NEXT_PUBLIC_ADMOB_REWARDED_ID` / `_INTERSTITIAL_ID` to override). **No
+  banner / in-board surface** — no ads on active game pages. iOS `Info.plist`
+  carries a test `GADApplicationIdentifier`.
+- **Rewarded-hint gate** live in all 7 hint games (`sudoku`, `slide`, `weaver`,
+  `connections`, `strands`, `forge`, `pips`).
+- **Archive premium gate + `src/components/Paywall.tsx`** (purchase / Restore /
+  Terms+Privacy): `archive/page.tsx` keeps the last 7 days free and locks older
+  days when gated. Inert on web (`billingAvailable` false → archive fully free).
+- `src/lib/config.ts` — `MonetizationConfig` defaults (free-hint threshold **2**,
+  interstitial every **3rd** transition AND ≤ once / **3 min**,
+  `premiumUnlocksArchive: true`), retunable via `setMonetizationConfig()`.
 
-## What still needs a human (cannot be done/verified headless)
+### RevenueCat catalog — configured (Test Store only)
 
-### 1. Install native deps + create the shells (MOB-1)
-```
-npm i @capacitor/core @capacitor/cli @capacitor/ios @capacitor/android @capacitor/preferences
-npm i @capacitor-community/admob @revenuecat/purchases-capacitor
-npx cap init   # appId games.braintap.app, appName BrainTap (already in capacitor.config.ts)
-npx cap add ios       # needs macOS + Xcode
-npx cap add android   # needs Android Studio / SDK
-```
-Then re-type `capacitor.config.ts`'s export to `CapacitorConfig` from `@capacitor/cli`.
+Project **Braintap** (`proj32ced423`), verified via the v2 API. The chain is
+coherent (a purchase grants the entitlement):
 
-### 2. Make the static export build (MOB-1) — DONE (`out/` builds)
-`npm run build:mobile` runs `scripts/build-mobile.mjs`: it temporarily moves the
-export-incompatible web-only files out (`src/middleware.ts`, `src/app/auth/callback`,
-the four OG/Twitter image routes), runs the export (`BUILD_TARGET=mobile` →
-`output: "export"`), then restores them. It now produces a complete `out/` with all
-35 static pages (including all 20 `play/*` routes). The web build (`npm run build`)
-is unaffected.
+| Thing | Value |
+| --- | --- |
+| Entitlement (app checks this) | **`Braintap Pro`** |
+| Offering | **`default`** → **Lifetime** package (`$rc_lifetime`) → product `lifetime` |
+| Product model | one-time **`lifetime`** unlock — **NOT a subscription** (confirm intent) |
+| Apps | only RevenueCat's built-in **Test Store** so far |
 
-The archive `?date=` param is read CLIENT-side in `src/app/play/[game]/PlayClient.tsx`
-(`useSearchParams`, Suspense-wrapped) so the route is export-safe; `page.tsx` stays a
-server component for `generateStaticParams` + metadata.
+The v2 secret key lives in `.env.local` (gitignored); public SDK keys come from
+real apps (below).
 
-Then `npx cap sync` copies `out/` + plugins into the native projects (step 1).
-Note: because the web OAuth callback is excluded from the app, mobile auth must use
-a native deep-link flow when you wire auth (step 3) — the app does not use
-`/auth/callback`.
+## Remaining to launch (human + accounts — not doable headless)
 
-### 3. Wire entitlement to RevenueCat (MON-3)
-In `src/lib/entitlement.tsx`, replace the web-inert body with a RevenueCat
-integration: configure the SDK (`NEXT_PUBLIC_REVENUECAT_*`), read `CustomerInfo`,
-set `isPremium` from the `premium` entitlement, `billingAvailable: true`, and
-implement `purchase()` / `restore()`. Cache natively via `@capacitor/preferences`
-for a synchronous launch read. Pass the Supabase user id (`useAuth()`) as the
-RevenueCat app-user-id when signed in.
-
-### 4. Wire AdMob (MON-1, MON-2)
-In `src/lib/ads/index.ts`: implement `showRewardedAd()` (resolve `"rewarded"`
-**only** on the reward callback) and the `maybeInterstitial()` body (show an
-AdMob interstitial), then set `NATIVE_ADS_WIRED = true`. Configure app + ad-unit
-ids (`NEXT_PUBLIC_ADMOB_*`); use test ids first. **Never** add a banner/in-board
-surface — the rule is no ads on active game pages.
-
-### 5. Roll the rewarded-hint gate to the remaining games (MON-1)
-Mirror the Sudoku reference (`src/games/sudoku/Sudoku.tsx` `handleHint`) in the
-other hint games: `slide`, `weaver`, `connections`, `strands`, `forge`, `pips`.
-In each `useHint`, before revealing:
-```
-if (adsAvailable() && !isPremium && hintsUsed >= getMonetizationConfig().freeHintThreshold) {
-  if ((await showRewardedAd()) !== "rewarded") return; // no ad → no hint, no penalty
-}
-```
-(Add `const { isPremium } = useEntitlement();` and make the handler async.)
-Optionally surface a "Watch ad for hint" label on `HintButton` past the threshold.
-
-### 6. Archive premium gate + Paywall (MON-3) — DEFERRED, not wired
-Intentionally **not** wired yet (it needs the Paywall screen + billing, which are
-native). To add: in `src/app/archive/page.tsx`, compute
-`const gated = billingAvailable && getMonetizationConfig().premiumUnlocksArchive && !isPremium`,
-keep the most recent N days free, and render a lock + "Go Premium" CTA (→ new
-`src/components/Paywall.tsx`) on older days when `gated`. On web `gated` is false,
-so the archive stays fully free. Build `Paywall.tsx` with the RevenueCat offering,
-a **Restore Purchases** button (required both stores), and Terms/Privacy links.
-
-### 7. Consent / privacy / store compliance (MOB-3)
-- iOS **ATT** prompt if AdMob uses IDFA — at a natural moment, not cold launch.
-- Google **UMP** consent for EEA/UK; non-personalized ads on denial.
-- Update the privacy policy for AdMob + RevenueCat; complete App Store **App
-  Privacy** + Play **Data safety** forms.
-
-### 8. Responsive (MOB-2)
-Already audited at 360/390/414 (see prior work); re-verify the rewarded-prompt /
-paywall surfaces at those widths once built.
+1. **Real store apps + products + public SDK keys.** Add a real **iOS app** and
+   **Android app** to the RevenueCat project (this generates the public
+   `appl_…` / `goog_…` SDK keys → set `NEXT_PUBLIC_REVENUECAT_*`). Create the
+   matching **subscription/IAP products** in App Store Connect / Play Console and
+   attach them to `Braintap Pro` + the `default` offering. (Needs Apple $99/yr +
+   Google $25 accounts.)
+2. **Real AdMob ids.** Create the app + a **rewarded** and **interstitial** unit
+   in AdMob; set `NEXT_PUBLIC_ADMOB_*` and the real `GADApplicationIdentifier`
+   (iOS) / Android manifest app id. Test units are wired meanwhile.
+3. **Android shell.** `cap add android` needs a **JDK** (not installed on the
+   build machine). Install a JDK + Android Studio, then `npx cap add android` →
+   `npm run build:mobile && npx cap sync android`.
+4. **On-device test.** Open `ios/App/App.xcodeproj` in Xcode → run on a
+   simulator/device, then exercise the flows by hand: Archive → a locked day →
+   Paywall → purchase (StoreKit/Test Store sheet); use hints past the free
+   threshold → a test rewarded ad. Requires Apple code-signing for a real device.
+5. **Consent / privacy / store compliance.** iOS **ATT** prompt (call
+   `AdMob.requestTrackingAuthorization()` at a natural moment, not cold launch);
+   Google **UMP** consent for EEA/UK; update the privacy policy for AdMob +
+   RevenueCat; complete App Store **App Privacy** + Play **Data safety** forms.
+6. **Responsive** — the 20 games were visually inspected at iPhone width (393px)
+   and render cleanly; re-check the paywall / rewarded-ad surfaces once they're
+   testable on device.
 
 ## Product decisions baked in as config defaults (retune in `config.ts`)
-- Free-hint threshold: **2** · Interstitial cap: **every 3rd transition AND ≤1/3 min**
-  · Premium: **remove ads + unlock archive, subscription** (`premiumUnlocksArchive: true`).
-All overridable at runtime via `setMonetizationConfig()` (wire to a remote source).
+- Free-hint threshold **2** · interstitial **every 3rd transition AND ≤1/3 min**
+  · premium = **remove ads + unlock archive**.
+- ⚠️ The live RevenueCat product is a **one-time lifetime unlock**, not the
+  subscription the original plan assumed — decide which you want before creating
+  the real store products.
