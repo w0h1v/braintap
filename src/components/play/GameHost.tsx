@@ -10,8 +10,9 @@ import {
   useState,
   type ComponentType,
 } from "react";
-import type { GameId, GameResult, Difficulty } from "@/lib/types";
-import { getGame } from "@/lib/games";
+import type { GameId, GameResult, Difficulty, AnyGameModule } from "@/lib/types";
+import { loadGame } from "@/lib/loadGame";
+import { PlaySkeleton } from "@/components/play/PlaySkeleton";
 import { useProgress } from "@/lib/progress";
 import { syncProgress } from "@/lib/sync";
 import { todayISO, dateLabel } from "@/lib/daily";
@@ -89,8 +90,36 @@ const TierTimer = memo(function TierTimer({
   );
 });
 
+/**
+ * Outer host: lazily loads the one game module for this route (code-split per
+ * game) and shows the skeleton until it arrives, then hands off to the real
+ * host. This is what keeps every non-/play page off the heavy game bundles.
+ */
 export function GameHost({ gameId, dateParam }: { gameId: GameId; dateParam?: string }) {
-  const game = getGame(gameId)!;
+  const [game, setGame] = useState<AnyGameModule | null>(null);
+  useEffect(() => {
+    let active = true;
+    loadGame(gameId).then((m) => {
+      if (active) setGame(m);
+    });
+    return () => {
+      active = false;
+    };
+  }, [gameId]);
+
+  if (!game) return <PlaySkeleton />;
+  return <GameHostInner game={game} gameId={gameId} dateParam={dateParam} />;
+}
+
+function GameHostInner({
+  game,
+  gameId,
+  dateParam,
+}: {
+  game: AnyGameModule;
+  gameId: GameId;
+  dateParam?: string;
+}) {
   const meta = game.meta;
   const supportsDiff = Boolean(game.supportsDifficulty);
   const showHostTimer = supportsDiff && game.hostTimer !== false;

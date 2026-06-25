@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ALL_GAMES, GAME_COUNT } from "@/lib/games";
+import { GAME_COUNT, GAME_METAS, GAME_ORDER } from "@/lib/games";
 import { useProgress } from "@/lib/progress";
 import { addDays, todayISO, fromISODate } from "@/lib/daily";
 import { cn } from "@/lib/cn";
@@ -174,8 +174,8 @@ export default function ArchivePage() {
 
                 {/* per-game status dots / badges */}
                 <div className="mt-3.5 flex flex-1 flex-wrap content-start gap-1.5">
-                  {ALL_GAMES.map((g) => {
-                    const meta = g.meta;
+                  {GAME_ORDER.map((gid) => {
+                    const meta = GAME_METAS[gid];
                     const r = dayResults[meta.id];
                     const color = dotColor(r, meta.accent.solid);
                     const title = r
@@ -185,6 +185,7 @@ export default function ArchivePage() {
                       <Link
                         key={meta.id}
                         href={`/play/${meta.id}?date=${iso}`}
+                        prefetch={false}
                         title={title}
                         aria-label={`Play ${meta.name} for ${dayLabel(iso)}`}
                         className={cn(
@@ -218,7 +219,8 @@ export default function ArchivePage() {
                     {playedCount > 0 ? "Tap a game to replay" : "Tap a game to play"}
                   </span>
                   <Link
-                    href={`/play/${ALL_GAMES[0]?.meta.id}?date=${iso}`}
+                    href={`/play/${GAME_ORDER[0]}?date=${iso}`}
+                    prefetch={false}
                     className="font-mono text-[10.5px] text-cyan transition-colors hover:text-cyan-soft"
                   >
                     Open →
