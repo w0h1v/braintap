@@ -58,7 +58,10 @@ export function Hub() {
     return [...set];
   }, [todayResults]);
 
-  const weekday = new Date().toLocaleDateString("en-US", { weekday: "short" });
+  // The rotation "TODAY" highlight depends on the client's weekday, which the
+  // statically-prerendered HTML can't know. Compute it only after hydration so
+  // the server render and the first client render agree (no hydration mismatch).
+  const weekday = hydrated ? new Date().toLocaleDateString("en-US", { weekday: "short" }) : null;
 
   // Favourites (persisted) — pinned in their own row at the top, in GAME_ORDER.
   const favorites = useProgress((s) => s.favorites);
@@ -89,7 +92,10 @@ export function Hub() {
         <div className="flex animate-rise flex-col items-center text-center">
           <div className="flex items-center gap-2.5 font-mono text-[11.5px] uppercase tracking-[0.26em] text-cyan-soft">
             <span className="h-1.5 w-1.5 animate-pulse2 rounded-full bg-cyan shadow-[0_0_8px_#00e5ff]" />
-            <span>{dateLabel(today)}</span>
+            {/* Date depends on the client's clock; the static HTML is built once.
+                suppressHydrationWarning lets the build-time text stand in until the
+                post-hydration re-render swaps in the viewer's date. */}
+            <span suppressHydrationWarning>{dateLabel(today)}</span>
           </div>
           {isReturning ? (
             <>
