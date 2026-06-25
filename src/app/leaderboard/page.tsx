@@ -75,11 +75,20 @@ export default function LeaderboardPage() {
   const results = useProgress((s) => s.results);
   const tierResults = useProgress((s) => s.tierResults);
 
-  const [selected, setSelected] = useState<GameId>(() => featuredGameId());
+  // Default to a STABLE game so the static SSR markup and the first client
+  // render agree; switch to the client-weekday featured game after mount
+  // (featuredGameId() reads new Date(), which would otherwise mismatch).
+  const [selected, setSelected] = useState<GameId>(GAME_ORDER[0]);
   const [tier, setTier] = useState<Difficulty>("medium");
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [liveTarget, setLiveTarget] = useState(0);
+
+  // Pick today's featured game on the client, post-mount (avoids the build-time
+  // vs client-weekday hydration mismatch).
+  useEffect(() => {
+    setSelected(featuredGameId());
+  }, []);
 
   const meta = GAME_METAS[selected];
 
@@ -222,7 +231,10 @@ export default function LeaderboardPage() {
                 <h2 className="font-display text-lg font-semibold text-ink">
                   Today&apos;s leaderboard
                 </h2>
-                <div className="font-mono text-[10.5px] tracking-[0.12em] text-ink-mute">
+                <div
+                  className="font-mono text-[10.5px] tracking-[0.12em] text-ink-mute"
+                  suppressHydrationWarning
+                >
                   {today}
                 </div>
               </div>
