@@ -51,6 +51,13 @@ for (const id of GAME_IDS) {
     await page.goto(`/play/${id}`);
     await expect(page.getByRole("link", { name: /Today/ }).first()).toBeVisible();
 
+    // The game module loads lazily, then re-measures its board (useFitBox) and
+    // plays a brief entry animation — both move/replace controls. Wait for the
+    // board panel and let that settle so the click below targets a STABLE
+    // control rather than one mid-detach/animation.
+    await expect(page.locator("#tier-panel, [role='tabpanel']").first()).toBeVisible();
+    await page.waitForTimeout(900);
+
     // Find an interactive control that isn't the nav chrome (Settings / Menu /
     // back link). Prefer a board control: any visible enabled button after the
     // header. We click the first such button and confirm the UI stays alive.

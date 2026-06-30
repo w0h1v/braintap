@@ -70,7 +70,7 @@ export function Weaver({
   // word strip, action row, hint) and the found-words list, so the whole game
   // fits a phone viewport without scrolling. The hive keeps its 260/280 aspect
   // ratio; 296 is its existing desktop max width.
-  const { ref: hiveFitRef, size: hiveSize } = useFitBox<HTMLDivElement>(260, 280, 152);
+  const { ref: hiveFitRef, size: hiveSize } = useFitBox<HTMLDivElement>(260, 280, 200);
 
   // Backward-compatible reads of saved state: older or cross-tier saves may hold
   // an `order` that is no longer a permutation of THIS hive's outer letters, or
