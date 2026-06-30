@@ -6,6 +6,7 @@ import { GAME_METAS } from "@/games/_meta";
 import { CompletionModal } from "@/components/play/CompletionModal";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
+import { useFitBox } from "@/lib/useFitBox";
 import { cn } from "@/lib/cn";
 import {
   WORD_LEN,
@@ -111,6 +112,8 @@ export function Brainle({
   // Guess allowance comes from the puzzle (tier-dependent); the host controls
   // difficulty, so we read it here rather than hardcoding 6.
   const maxRows = maxRowsOf(puzzle);
+  // Size the board to the available height so board + keyboard fit the viewport.
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(WORD_LEN, maxRows, 320);
 
   // Verdicts for already-submitted rows.
   const verdicts = useMemo(
@@ -370,9 +373,9 @@ export function Brainle({
   const guessesLeft = maxRows - guesses.length;
 
   return (
-    <div className={cn("flex w-full flex-col items-center", !reducedMotion && "animate-rise")}>
+    <div className={cn("flex min-h-0 w-full flex-1 flex-col items-center", !reducedMotion && "animate-rise")}>
       {/* hint + theme */}
-      <div className="mb-2 flex w-full max-w-[360px] items-center justify-between gap-2 px-1">
+      <div className="mb-2 flex w-full max-w-[360px] shrink-0 items-center justify-between gap-2 px-1">
         <span
           className="font-mono text-[10.5px] tracking-[0.18em]"
           style={{ color: ACCENT.soft }}
@@ -408,7 +411,7 @@ export function Brainle({
       {/* live status / message line */}
       <div
         className={cn(
-          "flex min-h-[22px] w-full max-w-[360px] items-center justify-center px-2 text-center font-mono text-[12.5px]",
+          "flex min-h-[22px] w-full max-w-[360px] shrink-0 items-center justify-center px-2 text-center font-mono text-[12.5px]",
           !reducedMotion && message && "animate-pop",
         )}
         style={{ color: ACCENT.soft }}
@@ -423,14 +426,16 @@ export function Brainle({
         {srSummary}
       </p>
 
-      {/* board */}
+      {/* board — flexes to the height left between the fixed header and keyboard,
+          sized by aspect ratio so board + keyboard fit the viewport (no scroll). */}
+      <div ref={boardFitRef} className="flex min-h-0 w-full flex-1 items-center justify-center">
       <div
         className={cn(
-          "mt-2 grid w-full max-w-[min(86vw,320px)] gap-[6px] transition-[filter] duration-500",
+          "grid gap-[6px] transition-[filter] duration-500",
           // Distinct lose cue: desaturate/dim the final board (skipped if reduced motion).
           over && !won && !reducedMotion && "[filter:grayscale(0.7)_brightness(0.82)]",
         )}
-        style={{ gridTemplateRows: `repeat(${maxRows}, 1fr)` }}
+        style={{ width: boardSize?.w, height: boardSize?.h, gridTemplateRows: `repeat(${maxRows}, 1fr)` }}
         role="grid"
         aria-label={`Guess board, ${guesses.length} of ${maxRows} guesses used`}
       >
@@ -512,10 +517,11 @@ export function Brainle({
           );
         })}
       </div>
+      </div>
 
       {/* keyboard — tight gaps + minimal padding so the 10-key top row keeps the
           widest possible per-key target at 360px (KEY-1). */}
-      <div className="mt-4 flex w-full max-w-[480px] flex-col items-center gap-[6px] px-0">
+      <div className="mt-3 flex w-full max-w-[480px] shrink-0 flex-col items-center gap-[6px] px-0">
         {KEY_ROWS.map((rowKeys, i) => (
           <div key={i} className="flex w-full justify-center gap-[4px]">
             {i === 2 && (

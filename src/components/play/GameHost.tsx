@@ -307,11 +307,11 @@ function GameHostInner({
   };
 
   return (
-    <div className="mx-auto max-w-shell px-4 pt-24 pb-[max(4rem,env(safe-area-inset-bottom))] sm:px-6">
+    <div className="mx-auto flex min-h-[100svh] max-w-shell flex-col px-4 pt-[68px] pb-[max(0.85rem,env(safe-area-inset-bottom))] sm:px-6 sm:pt-24 sm:pb-16">
       <WinCelebration trigger={winBurst} accent={meta.accent} reducedMotion={Boolean(reducedMotion)} />
       <StreakCelebration trigger={streakBurst} streak={celebStreak} reducedMotion={Boolean(reducedMotion)} />
       {/* header */}
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="mb-3 flex shrink-0 items-center justify-between gap-3 sm:mb-4">
         <Link
           href="/"
           onClick={() => void maybeInterstitial("return-home")}
@@ -335,16 +335,18 @@ function GameHostInner({
       </div>
 
       {isArchive && (
-        <div className="mb-4 rounded-xl border border-amber/30 bg-amber/[0.06] px-4 py-2 text-center font-mono text-[11px] text-amber-soft">
+        <div className="mb-3 shrink-0 rounded-xl border border-amber/30 bg-amber/[0.06] px-4 py-2 text-center font-mono text-[11px] text-amber-soft sm:mb-4">
           Archive puzzle · {dateLabel(dateISO)} — does not affect your streak
         </div>
       )}
 
       {/* Pre-game brain-insight teaser (lead clause only; the full insight is
-          the completion payoff). Dismissible for the session. */}
+          the completion payoff). Dismissible for the session. Hidden on small
+          screens so the board + controls fit the viewport without scrolling —
+          the full insight still lands in the completion modal. */}
       {!teaserDismissed && (
         <div
-          className="mb-4 flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5"
+          className="mb-3 hidden shrink-0 items-start gap-2.5 rounded-xl border px-3.5 py-2.5 sm:mb-4 sm:flex"
           style={{ borderColor: `${meta.accent.solid}2e`, background: `${meta.accent.solid}0f` }}
         >
           <span aria-hidden className="mt-px text-[13px]">🧠</span>
@@ -364,7 +366,7 @@ function GameHostInner({
 
       {/* difficulty tier bar + timer */}
       {supportsDiff && (
-        <div className="mb-4 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-3 flex shrink-0 flex-col gap-2 sm:mb-4 sm:flex-row sm:items-center sm:justify-between sm:gap-2.5">
           <div
             role="tablist"
             aria-label="Difficulty"
@@ -431,7 +433,7 @@ function GameHostInner({
       )}
 
       {supportsDiff && hintsCfg != null && (
-        <div className="-mt-1.5 mb-4 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[11px] text-ink-mute">
+        <div className="-mt-1 mb-3 flex shrink-0 flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[11px] text-ink-mute sm:mb-4">
           <span aria-hidden>💡</span>
           {flatHints != null ? (
             <span>
@@ -460,26 +462,32 @@ function GameHostInner({
         id={supportsDiff ? "tier-panel" : undefined}
         role={supportsDiff ? "tabpanel" : undefined}
         aria-labelledby={supportsDiff ? `tier-tab-${difficulty}` : undefined}
-        className="rounded-3xl border border-line bg-gradient-to-b from-[rgba(11,15,31,0.65)] to-[rgba(6,8,18,0.6)] p-3 sm:p-6"
+        className="flex min-h-0 flex-1 flex-col rounded-3xl border border-line bg-gradient-to-b from-[rgba(11,15,31,0.65)] to-[rgba(6,8,18,0.6)] p-3 sm:p-6"
       >
         <DifficultyContext.Provider value={tierNav}>
-          <GameComponent
-            key={componentKey}
-            puzzle={puzzle}
-            dateISO={dateISO}
-            onComplete={onComplete}
-            savedState={savedState}
-            onPersistState={onPersistState}
-            reducedMotion={Boolean(reducedMotion)}
-            isArchive={isArchive}
-            difficulty={activeDiff}
-            hostTimer={showHostTimer}
-          />
+          {/* Bounded flex region: a game whose root is `flex-1 min-h-0` fills this
+              and can size its board to the available height (set by the flex
+              column above) so board + controls fit the viewport without page
+              scroll. Games that don't opt in simply render at natural height. */}
+          <div className="flex min-h-0 flex-1 flex-col">
+            <GameComponent
+              key={componentKey}
+              puzzle={puzzle}
+              dateISO={dateISO}
+              onComplete={onComplete}
+              savedState={savedState}
+              onPersistState={onPersistState}
+              reducedMotion={Boolean(reducedMotion)}
+              isArchive={isArchive}
+              difficulty={activeDiff}
+              hostTimer={showHostTimer}
+            />
+          </div>
         </DifficultyContext.Provider>
       </div>
 
       {tierResult && (
-        <div className="mt-4 flex flex-col items-center gap-2 text-center">
+        <div className="mt-3 flex shrink-0 flex-col items-center gap-2 text-center sm:mt-4">
           <div className="font-mono text-xs tracking-[0.16em] text-mint">
             {tierWon ? "SOLVED" : tierResult.status === "lost" ? "COMPLETE" : "PLAYED"}
             {typeof tierResult.score === "number" ? ` · ${tierResult.score} pts` : ""}
