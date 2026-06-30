@@ -661,7 +661,7 @@ export function Pips({
   return (
     <div className="mx-auto flex min-h-0 w-full max-w-[440px] flex-1 flex-col items-center px-1">
       {!hostTimer && (
-        <div className="mb-3 flex w-full shrink-0 items-center justify-end font-mono text-[11px] text-ink-mute">
+        <div className="mb-1.5 flex w-full shrink-0 items-center justify-end font-mono text-[11px] text-ink-mute sm:mb-3">
           <span
             className="font-semibold tabular-nums tracking-[0.06em] text-ink-soft"
             aria-label={`Time elapsed ${formatClock(clock.ms)}`}
@@ -684,7 +684,7 @@ export function Pips({
       {/* Live star goal — a soft target so a fast solve feels earned. */}
       {!won && (
         <div
-          className="mb-2 flex w-full shrink-0 items-center justify-between font-mono text-[10px] tracking-[0.08em] text-ink-mute"
+          className="mb-1.5 flex w-full shrink-0 items-center justify-between font-mono text-[10px] tracking-[0.08em] text-ink-mute sm:mb-2"
           aria-hidden
         >
           <span className="tabular-nums" style={{ color: liveStars === 3 ? MET : undefined }}>
@@ -692,7 +692,9 @@ export function Pips({
             <span className="text-ink-faint">{"☆".repeat(3 - liveStars)}</span>
             <span className="ml-1.5 text-ink-faint">on pace</span>
           </span>
-          <span className="text-ink-faint">
+          {/* Threshold legend is desktop-only — it's a nicety, and dropping it on
+              phones saves a wrapped line of fixed chrome. */}
+          <span className="hidden text-ink-faint sm:inline">
             {liveStars > 1
               ? `★★★ under ${STAR_SECONDS.three}s · ★★ under ${STAR_SECONDS.two}s`
               : "solve faster for more stars"}
@@ -827,11 +829,11 @@ export function Pips({
       {/* Won-board review affordance: the board is locked, so offer the next
           actions inline (not only buried in the modal). */}
       {won && (
-        <div className="mt-4 flex w-full shrink-0 items-center justify-center gap-2.5">
+        <div className="mt-2 flex w-full shrink-0 items-center justify-center gap-2.5 sm:mt-4">
           <button
             type="button"
             onClick={replayPuzzle}
-            className="flex items-center gap-1.5 rounded-pill border border-line-strong px-5 py-2.5 font-display text-[13.5px] text-[#eaf1ff] outline-none transition-colors hover:border-white/30 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40"
+            className="flex items-center gap-1.5 rounded-pill border border-line-strong px-5 py-2 font-display text-[13.5px] text-[#eaf1ff] outline-none transition-colors hover:border-white/30 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40 sm:py-2.5"
             style={{ background: "rgba(255,255,255,0.04)" }}
           >
             <span aria-hidden className="text-[15px] leading-none">↻</span>
@@ -839,7 +841,7 @@ export function Pips({
           </button>
           <Link
             href="/"
-            className="rounded-pill border border-line-strong px-5 py-2.5 font-display text-[13.5px] text-[#eaf1ff] outline-none transition-colors hover:border-white/30 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40"
+            className="rounded-pill border border-line-strong px-5 py-2 font-display text-[13.5px] text-[#eaf1ff] outline-none transition-colors hover:border-white/30 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40 sm:py-2.5"
             style={{ background: "rgba(255,255,255,0.04)" }}
           >
             Back to today
@@ -848,7 +850,7 @@ export function Pips({
       )}
 
       {/* Selected-domino toolbar */}
-      <div className="mt-4 flex min-h-[44px] w-full shrink-0 items-center justify-center">
+      <div className="mt-2 flex min-h-[40px] w-full shrink-0 items-center justify-center sm:mt-4 sm:min-h-[44px]">
         {selFaces ? (
           <div
             className="flex items-center gap-2 rounded-pill border px-2.5 py-1.5"
@@ -886,7 +888,7 @@ export function Pips({
               type="button"
               onClick={rotate}
               aria-label="Rotate domino orientation"
-              className="flex h-11 min-w-[44px] items-center justify-center rounded-full text-[15px] text-ink-soft outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-white/60"
+              className="flex h-9 min-w-[36px] items-center justify-center rounded-full text-[15px] text-ink-soft outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-white/60 sm:h-11 sm:min-w-[44px]"
               style={{ background: "rgba(255,255,255,0.08)" }}
             >
               ↻
@@ -895,7 +897,7 @@ export function Pips({
               type="button"
               onClick={flipPending}
               aria-label="Swap domino faces"
-              className="flex h-11 min-w-[44px] items-center justify-center rounded-full text-[15px] text-ink-soft outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-white/60"
+              className="flex h-9 min-w-[36px] items-center justify-center rounded-full text-[15px] text-ink-soft outline-none transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-white/60 sm:h-11 sm:min-w-[44px]"
               style={{ background: "rgba(255,255,255,0.08)" }}
             >
               ⇄
@@ -910,7 +912,7 @@ export function Pips({
 
       {/* Tray */}
       <div
-        className="mt-3 flex min-h-[74px] w-full shrink-0 flex-wrap items-center justify-center gap-3 rounded-2xl border px-3 py-3"
+        className="mt-2 flex min-h-[58px] w-full shrink-0 flex-wrap items-center justify-center gap-2 rounded-2xl border px-2.5 py-2 sm:mt-3 sm:min-h-[74px] sm:gap-3 sm:px-3 sm:py-3"
         style={{ borderColor: "rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.02)" }}
       >
         {allPlaced ? (
@@ -940,11 +942,11 @@ export function Pips({
                   transform: isSel && !reducedMotion ? "translateY(-3px)" : "none",
                 }}
               >
-                <span style={{ width: 38, height: 38 }}>
+                <span className="h-8 w-8 sm:h-[38px] sm:w-[38px]">
                   <PipFace value={d[0]} />
                 </span>
-                <span style={{ width: 1, background: "rgba(4,6,15,.45)", margin: "6px 0" }} />
-                <span style={{ width: 38, height: 38 }}>
+                <span className="my-1 w-px sm:my-1.5" style={{ background: "rgba(4,6,15,.45)" }} />
+                <span className="h-8 w-8 sm:h-[38px] sm:w-[38px]">
                   <PipFace value={d[1]} />
                 </span>
               </button>
@@ -953,15 +955,17 @@ export function Pips({
         )}
       </div>
 
-      {/* Undo / redo */}
-      <div className="mt-4 flex w-full shrink-0 items-center justify-center gap-2.5">
+      {/* Controls — undo/redo + hint/reset. On phones these collapse into a
+          single wrapping row to claw back a full row-gap of fixed chrome; on
+          sm+ they split back into the original two centred rows. */}
+      <div className="mt-2 flex w-full shrink-0 flex-wrap items-center justify-center gap-1.5 sm:mt-4 sm:gap-2.5">
         <button
           type="button"
           onClick={undo}
           disabled={!canUndo}
           aria-label="Undo last move"
           title="Undo (Ctrl/Cmd+Z)"
-          className="flex items-center gap-1.5 rounded-pill border border-line-strong px-5 py-2 font-display text-[13px] text-[#eaf1ff] outline-none transition-colors hover:border-white/30 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-pill border border-line-strong px-4 py-2 font-display text-[13px] text-[#eaf1ff] outline-none transition-colors hover:border-white/30 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-40 sm:px-5"
           style={{ background: "rgba(255,255,255,0.04)" }}
         >
           <span aria-hidden className="text-[15px] leading-none">
@@ -975,7 +979,7 @@ export function Pips({
           disabled={!canRedo}
           aria-label="Redo move"
           title="Redo (Ctrl/Cmd+Shift+Z)"
-          className="flex items-center gap-1.5 rounded-pill border border-line-strong px-5 py-2 font-display text-[13px] text-[#eaf1ff] outline-none transition-colors hover:border-white/30 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-pill border border-line-strong px-4 py-2 font-display text-[13px] text-[#eaf1ff] outline-none transition-colors hover:border-white/30 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-40 sm:px-5"
           style={{ background: "rgba(255,255,255,0.04)" }}
         >
           Redo
@@ -983,10 +987,8 @@ export function Pips({
             ↷
           </span>
         </button>
-      </div>
-
-      {/* Controls: hint + reset */}
-      <div className="mt-3 flex w-full shrink-0 items-center justify-center gap-2.5">
+        {/* Force a row break on sm+ so hint/reset sit on their own line as before. */}
+        <div className="hidden basis-full sm:block" aria-hidden />
         <HintButton
           used={hintsUsed}
           max={MAX_HINTS}
@@ -998,7 +1000,7 @@ export function Pips({
           type="button"
           onClick={reset}
           disabled={won}
-          className="rounded-pill border border-line-strong px-6 py-2.5 font-display text-[13.5px] text-[#eaf1ff] outline-none transition-colors hover:border-white/30 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-40"
+          className="rounded-pill border border-line-strong px-4 py-2 font-display text-[13px] text-[#eaf1ff] outline-none transition-colors hover:border-white/30 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-40 sm:px-6 sm:py-2.5 sm:text-[13.5px]"
           style={{ background: "rgba(255,255,255,0.04)" }}
         >
           Reset board
@@ -1007,7 +1009,7 @@ export function Pips({
 
       <p
         aria-live="polite"
-        className="mt-3 min-h-[2.5rem] shrink-0 text-center font-mono text-[12.5px] leading-snug transition-colors"
+        className="mt-2 min-h-[2rem] shrink-0 text-center font-mono text-[12px] leading-snug transition-colors sm:mt-3 sm:min-h-[2.5rem] sm:text-[12.5px]"
         style={{ color: won ? MET : ACCENT.soft }}
       >
         {status}

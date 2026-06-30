@@ -395,26 +395,26 @@ export function Schulte({
       {/* stat boxes */}
       <div
         className={cn(
-          "mb-3 flex w-full shrink-0 items-stretch justify-center gap-3",
+          "mb-2 flex w-full shrink-0 items-stretch justify-center gap-2 sm:mb-3 sm:gap-3",
           !reducedMotion && "animate-rise",
         )}
         style={{ maxWidth: boardMax }}
       >
         <div
-          className="relative flex flex-1 flex-col items-center overflow-hidden rounded-2xl border px-4 py-2.5"
+          className="relative flex flex-1 flex-col items-center overflow-hidden rounded-2xl border px-4 py-1 sm:py-2.5"
           style={{
             background: `${ACCENT.solid}12`,
             borderColor: `${ACCENT.solid}40`,
           }}
         >
           <div
-            className="font-display text-[26px] font-semibold leading-none tabular-nums"
+            className="font-display text-[21px] font-semibold leading-none tabular-nums sm:text-[26px]"
             style={{ color: "#eafcff" }}
           >
             {Math.min(next, max)}
           </div>
           <div
-            className="mt-1.5 font-mono text-[9.5px] tracking-[0.14em]"
+            className="mt-1 font-mono text-[9.5px] tracking-[0.14em] sm:mt-1.5"
             style={{ color: ACCENT.soft }}
           >
             FIND NEXT
@@ -424,19 +424,19 @@ export function Schulte({
             live deci-second timer always lives here, next to the board, where
             the player is looking. A live "vs best" delta builds in-run tension. */}
         <div
-          className="flex flex-1 flex-col items-center rounded-2xl border px-4 py-2.5"
+          className="flex flex-1 flex-col items-center rounded-2xl border px-4 py-1 sm:py-2.5"
           style={{
             background: isNewBest ? `${ACCENT.solid}1f` : "rgba(255,255,255,0.04)",
             borderColor: isNewBest ? `${ACCENT.solid}66` : "rgba(255,255,255,0.1)",
           }}
         >
           <div
-            className="font-display text-[26px] font-semibold leading-none tabular-nums"
+            className="font-display text-[21px] font-semibold leading-none tabular-nums sm:text-[26px]"
             style={{ color: isNewBest ? ACCENT.solid : "#ffb020" }}
           >
             {formatSecs(displayMs)}
           </div>
-          <div className="mt-1.5 font-mono text-[9.5px] tracking-[0.14em] text-[rgba(226,234,255,0.45)]">
+          <div className="mt-1 font-mono text-[9.5px] tracking-[0.14em] text-[rgba(226,234,255,0.45)] sm:mt-1.5">
             {isNewBest ? (
               <span style={{ color: ACCENT.solid }}>★ NEW BEST</span>
             ) : running && vsBestMs != null ? (
@@ -458,7 +458,7 @@ export function Schulte({
 
       {/* progress bar */}
       <div
-        className="mb-2 h-1 w-full shrink-0 overflow-hidden rounded-pill bg-white/[0.06]"
+        className="mb-1.5 h-1 w-full shrink-0 overflow-hidden rounded-pill bg-white/[0.06] sm:mb-2"
         style={{ maxWidth: boardMax }}
         role="presentation"
         aria-hidden
@@ -476,7 +476,7 @@ export function Schulte({
           authoritative live region, so this is hidden from assistive tech to
           avoid two regions talking over each other. */}
       <div
-        className="flex min-h-[20px] shrink-0 items-center justify-center text-center font-mono text-[12.5px]"
+        className="flex min-h-[16px] shrink-0 items-center justify-center text-center font-mono text-[11.5px] sm:min-h-[20px] sm:text-[12.5px]"
         style={{ color: message.startsWith("Tap") ? "#ff9bb6" : ACCENT.soft }}
         aria-hidden
       >
@@ -487,7 +487,7 @@ export function Schulte({
           sized as a square by useFitBox so the whole game fits the viewport. */}
       <div ref={fitRef} className="flex min-h-0 w-full flex-1 items-center justify-center">
       <div
-        className="relative mt-2"
+        className="relative mt-1 sm:mt-2"
         style={{ width: boardSize?.w, height: boardSize?.h }}
       >
         <div
@@ -586,7 +586,7 @@ export function Schulte({
           type="button"
           onClick={() => start(completedAnyThisMount)}
           className={cn(
-            "mt-4 shrink-0 rounded-[13px] px-9 py-3.5 font-display text-[15px] font-semibold outline-none",
+            "mt-2.5 min-h-[44px] shrink-0 rounded-[13px] px-9 py-2.5 font-display text-[15px] font-semibold outline-none sm:mt-4 sm:py-3.5",
             "focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent",
             !reducedMotion && "transition-transform active:scale-[0.97]",
           )}
@@ -604,7 +604,7 @@ export function Schulte({
           type="button"
           onClick={abandon}
           className={cn(
-            "mt-4 min-h-[44px] shrink-0 rounded-pill border px-6 py-2.5 font-display text-[13px] text-[#eaf1ff] outline-none",
+            "mt-2.5 min-h-[40px] shrink-0 rounded-pill border px-6 py-2 font-display text-[13px] text-[#eaf1ff] outline-none sm:mt-4 sm:min-h-[44px] sm:py-2.5",
             !reducedMotion && "transition-colors active:scale-[0.98]",
           )}
           style={{ borderColor: "rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)" }}
@@ -616,7 +616,7 @@ export function Schulte({
 
       {/* Surface the keyboard affordances so they are discoverable, not hidden. */}
       {running && (
-        <p className="mt-2 shrink-0 text-center font-mono text-[10px] tracking-[0.12em] text-[rgba(226,234,255,0.4)]">
+        <p className="mt-1.5 shrink-0 text-center font-mono text-[10px] tracking-[0.12em] text-[rgba(226,234,255,0.4)] sm:mt-2">
           TYPE THE NUMBER · ESC TO RESET
         </p>
       )}

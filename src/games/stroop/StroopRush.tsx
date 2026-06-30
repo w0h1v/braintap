@@ -444,7 +444,7 @@ export function StroopRush({
       }}
     >
       {/* stats bar */}
-      <div className="grid w-full shrink-0 grid-cols-3 gap-2.5">
+      <div className="grid w-full shrink-0 grid-cols-3 gap-2 sm:gap-2.5">
         <StatCard
           value={String(remainingSec)}
           label="SECONDS"
@@ -472,7 +472,7 @@ export function StroopRush({
       {/* personal best for this tier */}
       {best != null && (
         <p
-          className="mt-2 shrink-0 font-mono text-[10px] tracking-[0.12em]"
+          className="mt-1.5 shrink-0 font-mono text-[10px] tracking-[0.12em]"
           style={{ color: "rgba(226,234,255,0.5)" }}
         >
           PERSONAL BEST · <span style={{ color: ACCENT.soft }}>{best} CORRECT</span>
@@ -493,11 +493,11 @@ export function StroopRush({
           and the swatch palette so the whole game fits without page scroll. */}
       <div
         className={cn(
-          "relative mt-4 flex w-full min-h-0 flex-1 items-center justify-center overflow-hidden rounded-3xl border",
+          "relative mt-2.5 flex w-full min-h-0 flex-1 items-center justify-center overflow-hidden rounded-3xl border sm:mt-4",
           shake && !reducedMotion && "animate-shake",
         )}
         style={{
-          minHeight: "clamp(96px, 24vw, 168px)",
+          minHeight: "clamp(76px, 22vw, 168px)",
           maxHeight: "168px",
           background: flash && !reducedMotion
             ? `radial-gradient(circle at center, ${ACCENT.solid}22, rgba(8,12,26,0.55))`
@@ -553,7 +553,7 @@ export function StroopRush({
 
       {/* swatch palette */}
       <div
-        className="mt-4 grid w-full shrink-0 gap-2.5"
+        className="mt-2.5 grid w-full shrink-0 gap-2 sm:mt-4 sm:gap-2.5"
         style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
         role="group"
         aria-label="Colour swatches — choose the ink colour"
@@ -569,7 +569,7 @@ export function StroopRush({
               onClick={() => answer(i)}
               aria-label={`${c.label[0]}${c.label.slice(1).toLowerCase()}${i < 9 ? `, key ${i + 1}` : ""}`}
               className={cn(
-                "flex select-none flex-col items-center justify-center rounded-2xl border-2 font-display font-semibold",
+                "flex min-h-[46px] select-none flex-col items-center justify-center rounded-2xl border-2 font-display font-semibold sm:min-h-[56px]",
                 !reducedMotion &&
                   "transition-[transform,box-shadow,border-color] duration-150 active:scale-95",
                 isWrong && !reducedMotion && "animate-shake",
@@ -577,7 +577,6 @@ export function StroopRush({
                 phase === "playing" ? "cursor-pointer" : "cursor-default",
               )}
               style={{
-                minHeight: 56,
                 background: c.hex,
                 borderColor: isWrong ? "#ffffff" : `${ACCENT.solid}80`,
                 boxShadow: `0 6px 18px ${c.hex}40`,
@@ -613,12 +612,12 @@ export function StroopRush({
       {showStart ? (
         <div
           className={cn(
-            "mt-4 flex w-full shrink-0 flex-col items-center",
+            "mt-3 flex w-full shrink-0 flex-col items-center sm:mt-4",
             !reducedMotion && "animate-rise",
           )}
         >
           {phase === "idle" && (
-            <p className="mb-3 px-2 text-center font-display text-[13.5px] leading-snug text-[rgba(226,234,255,0.62)]">
+            <p className="mb-2.5 px-2 text-center font-display text-[12.5px] leading-snug text-[rgba(226,234,255,0.62)] sm:mb-3 sm:text-[13.5px]">
               Each round shows a colour word painted in a{" "}
               <span style={{ color: ACCENT.solid }}>different ink</span>. Tap the swatch matching
               the <span style={{ color: ACCENT.solid }}>ink you see</span> — ignore what the word
@@ -630,7 +629,7 @@ export function StroopRush({
             type="button"
             onClick={start}
             className={cn(
-              "rounded-xl px-9 py-3.5 font-display text-[15px] font-semibold text-[#04060f]",
+              "rounded-xl px-9 py-3 font-display text-[15px] font-semibold text-[#04060f] sm:py-3.5",
               !reducedMotion && "transition-transform duration-200 hover:-translate-y-0.5",
               "active:scale-95",
             )}
@@ -643,7 +642,7 @@ export function StroopRush({
           </button>
         </div>
       ) : (
-        <div className="mt-4 flex w-full shrink-0 flex-col items-center gap-3">
+        <div className="mt-2.5 flex w-full shrink-0 flex-col items-center gap-2 sm:mt-4 sm:gap-3">
           <p className="text-center font-mono text-[10.5px] tracking-[0.08em] text-ink-faint">
             TAP THE INK COLOUR · NOT THE WORD
           </p>
@@ -652,7 +651,7 @@ export function StroopRush({
             onClick={giveUp}
             disabled={resumeCountdown != null}
             className={cn(
-              "rounded-lg border border-line-strong bg-white/[0.04] px-5 py-2 font-display text-[12.5px] font-semibold text-[rgba(226,234,255,0.7)]",
+              "rounded-lg border border-line-strong bg-white/[0.04] px-5 py-1.5 font-display text-[12.5px] font-semibold text-[rgba(226,234,255,0.7)] sm:py-2",
               !reducedMotion && "transition-colors duration-150 hover:text-ink active:scale-95",
               resumeCountdown != null && "opacity-40",
             )}
@@ -727,7 +726,7 @@ function StatCard({
   return (
     <div
       className={cn(
-        "relative flex flex-col items-center justify-center rounded-2xl px-2 py-3",
+        "relative flex flex-col items-center justify-center rounded-2xl px-2 py-2 sm:py-3",
         // Let the GOAL/-Ns overlays escape the card; otherwise clip the
         // bottom progress bar to the rounded corners.
         badge || penaltyFloat ? "overflow-visible" : "overflow-hidden",
@@ -764,13 +763,13 @@ function StatCard({
         </span>
       )}
       <div
-        className="font-display text-[30px] font-semibold leading-none transition-colors duration-150"
+        className="font-display text-[26px] font-semibold leading-none transition-colors duration-150 sm:text-[30px]"
         style={{ color: flash && flashColor ? flashColor : color }}
       >
         {value}
       </div>
       <div
-        className="mt-1.5 font-mono text-[9.5px] tracking-[0.14em]"
+        className="mt-1 font-mono text-[9.5px] tracking-[0.14em] sm:mt-1.5"
         style={{ color: accentBorder ? ACCENT.soft : "rgba(226,234,255,0.45)" }}
       >
         {label}

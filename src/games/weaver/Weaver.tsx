@@ -70,7 +70,7 @@ export function Weaver({
   // word strip, action row, hint) and the found-words list, so the whole game
   // fits a phone viewport without scrolling. The hive keeps its 260/280 aspect
   // ratio; 296 is its existing desktop max width.
-  const { ref: hiveFitRef, size: hiveSize } = useFitBox<HTMLDivElement>(260, 280, 296);
+  const { ref: hiveFitRef, size: hiveSize } = useFitBox<HTMLDivElement>(260, 280, 152);
 
   // Backward-compatible reads of saved state: older or cross-tier saves may hold
   // an `order` that is no longer a permutation of THIS hive's outer letters, or
@@ -453,7 +453,7 @@ export function Weaver({
       </div>
 
       <div
-        className="mt-2 h-1.5 w-full shrink-0 overflow-hidden rounded-full"
+        className="mt-1.5 h-1.5 w-full shrink-0 overflow-hidden rounded-full"
         style={{ background: "rgba(255,255,255,0.06)" }}
         role="progressbar"
         aria-label={goalMet ? "Words found" : "Progress to goal"}
@@ -484,14 +484,14 @@ export function Weaver({
         disabled={!cur}
         aria-label={cur ? `Current word ${cur}. Tap to delete last letter.` : "Current word, empty"}
         className={cn(
-          "mt-3 flex min-h-[40px] w-full shrink-0 items-center justify-center rounded-xl px-3",
+          "mt-2 flex min-h-[34px] w-full shrink-0 items-center justify-center rounded-xl px-3 sm:mt-3 sm:min-h-[40px]",
           "transition-colors disabled:cursor-default",
           shake && !reducedMotion && "animate-shake",
         )}
       >
         <span role="status" aria-live="polite" className="break-all text-center">
           {cur ? (
-            <span className="font-display text-[26px] font-semibold tracking-[0.08em]">
+            <span className="font-display text-[22px] font-semibold tracking-[0.08em] sm:text-[26px]">
               {cur.split("").map((ch, i) => {
                 const isCenter = ch === puzzle.center;
                 return (
@@ -536,7 +536,7 @@ export function Weaver({
 
       {/* Flash feedback */}
       <div
-        className="mt-1 flex min-h-[18px] shrink-0 items-center justify-center"
+        className="mt-0.5 flex min-h-[16px] shrink-0 items-center justify-center sm:mt-1 sm:min-h-[18px]"
         role="status"
         aria-live="assertive"
       >
@@ -558,7 +558,7 @@ export function Weaver({
           and is sized to fit by useFitBox (keeps its 260/280 aspect). */}
       <div
         ref={hiveFitRef}
-        className="mt-3 flex min-h-0 w-full flex-1 items-center justify-center"
+        className="mt-2 flex min-h-0 w-full flex-1 items-center justify-center sm:mt-3"
       >
         <Hive
           cells={cells}
@@ -572,15 +572,16 @@ export function Weaver({
         />
       </div>
 
-      {/* Action buttons — flex-nowrap with breakpoint-scaled gap/padding so the
-          Delete / Shuffle / Enter row never wraps or clips on a ~320px phone. */}
-      <div className="mt-4 flex w-full shrink-0 flex-nowrap items-center justify-center gap-2 sm:gap-3">
+      {/* Action buttons — Delete / Shuffle / Enter / Hint share ONE flex-nowrap
+          row on mobile (saves a stacked row of vertical space); paddings/gap and
+          button heights scale up at sm:. Heights stay >= 40px tap targets. */}
+      <div className="mt-2.5 flex w-full shrink-0 flex-nowrap items-center justify-center gap-1.5 sm:mt-4 sm:gap-3">
         <button
           type="button"
           onClick={del}
           disabled={!cur}
           className={cn(
-            "min-h-[44px] rounded-pill border border-line-strong px-4 font-display text-[14px] text-[#eaf1ff] sm:px-5",
+            "min-h-[40px] rounded-pill border border-line-strong px-3 font-display text-[13px] text-[#eaf1ff] sm:min-h-[44px] sm:px-5 sm:text-[14px]",
             "outline-none transition-transform focus-visible:ring-2 focus-visible:ring-white/30 active:scale-95 disabled:opacity-40",
           )}
           style={{ background: "rgba(255,255,255,0.04)" }}
@@ -592,7 +593,7 @@ export function Weaver({
           onClick={shuffle}
           aria-label="Shuffle outer letters"
           className={cn(
-            "flex h-[44px] w-[44px] items-center justify-center rounded-pill border border-line-strong font-display text-lg text-[#eaf1ff]",
+            "flex h-10 w-10 items-center justify-center rounded-pill border border-line-strong font-display text-lg text-[#eaf1ff] sm:h-[44px] sm:w-[44px]",
             "outline-none transition-transform focus-visible:ring-2 focus-visible:ring-white/30 active:scale-95 disabled:opacity-40",
           )}
           style={{ background: "rgba(255,255,255,0.04)" }}
@@ -613,7 +614,7 @@ export function Weaver({
           onClick={submit}
           disabled={cur.length < 4}
           className={cn(
-            "min-h-[44px] rounded-pill px-6 font-display text-[14px] font-semibold text-[#04060f] sm:px-7",
+            "min-h-[40px] rounded-pill px-4 font-display text-[13px] font-semibold text-[#04060f] sm:min-h-[44px] sm:px-7 sm:text-[14px]",
             "outline-none transition-transform focus-visible:ring-2 focus-visible:ring-white/50 active:scale-95",
             "disabled:opacity-40",
           )}
@@ -621,29 +622,28 @@ export function Weaver({
         >
           Enter
         </button>
-      </div>
-
-      {/* Hint */}
-      <div className="mt-3 flex w-full shrink-0 items-center justify-center">
         <HintButton
           used={hintsUsed}
           max={MAX_HINTS}
           onHint={useHint}
           accent={ACCENT}
           disabled={found.length >= total}
+          className="min-h-[40px] gap-1 px-3 py-2 text-[12.5px] sm:min-h-[44px] sm:px-4 sm:py-2.5 sm:text-[13.5px]"
         />
       </div>
 
       {/* Found words — a secondary region that may shrink (its chip list scrolls)
-          so the hive + controls always win the vertical budget on small phones. */}
-      <div className="mt-4 flex min-h-0 w-full shrink flex-col">
-        <div className="mb-2 flex shrink-0 items-center justify-between font-mono text-[10px] tracking-[0.16em] text-ink-faint">
+          so the hive + controls always win the vertical budget on small phones.
+          The list is capped low on mobile (scrolls internally) so it never grows
+          the page; it expands at sm:. */}
+      <div className="mt-2.5 flex min-h-0 w-full shrink flex-col sm:mt-4">
+        <div className="mb-1.5 flex shrink-0 items-center justify-between font-mono text-[10px] tracking-[0.16em] text-ink-faint sm:mb-2">
           <span>FOUND · {found.length}</span>
           <span>{total - found.length} LEFT</span>
         </div>
         {found.length === 0 ? (
           <div
-            className="shrink-0 rounded-xl border border-dashed px-4 py-5 text-center font-mono text-[11px] text-ink-faint"
+            className="shrink-0 rounded-xl border border-dashed px-4 py-3 text-center font-mono text-[11px] text-ink-faint sm:py-5"
             style={{ borderColor: "rgba(255,255,255,0.1)" }}
           >
             Words you find appear here.
@@ -652,7 +652,7 @@ export function Weaver({
           </div>
         ) : (
           <div
-            className="flex max-h-[168px] min-h-0 flex-1 flex-wrap content-start gap-[7px] overflow-y-auto pr-1"
+            className="flex max-h-[60px] min-h-0 flex-1 flex-wrap content-start gap-[6px] overflow-y-auto pr-1 sm:max-h-[168px] sm:gap-[7px]"
           >
             {foundDisplay.map((w) => {
               const isPan = isPangram(w, hive);

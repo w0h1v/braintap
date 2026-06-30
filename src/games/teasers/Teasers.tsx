@@ -343,8 +343,8 @@ export function Teasers({
       </div>
 
       {/* Counter + progress bar */}
-      <div className="mt-3 w-full shrink-0" style={{ maxWidth: SURFACE }}>
-        <div className="mb-2 flex items-center justify-between">
+      <div className="mt-2 w-full shrink-0 sm:mt-3" style={{ maxWidth: SURFACE }}>
+        <div className="mb-1.5 flex items-center justify-between sm:mb-2">
           <span
             className="font-mono text-[10.5px] tracking-[0.16em]"
             style={{ color: ACCENT.soft }}
@@ -394,14 +394,14 @@ export function Teasers({
           progress and the safe-area bottom, centres the active riddle card, and
           scrolls internally (never the page) if content can't fit a short
           viewport. The post-game review lives here too. */}
-      <div className="flex min-h-0 w-full flex-1 flex-col items-center overflow-y-auto py-3">
+      <div className="flex min-h-0 w-full flex-1 flex-col items-center overflow-y-auto py-2 sm:py-3">
 
       {/* Riddle card (active play) */}
       {!done && (
       <div
         key={safeIndex}
         className={cn(
-          "relative my-auto w-full shrink-0 overflow-hidden rounded-[20px] border p-5 sm:p-7",
+          "relative my-auto w-full shrink-0 overflow-hidden rounded-[20px] border p-4 sm:p-7",
           !reducedMotion && "animate-rise",
           shake && !reducedMotion && "animate-shake",
         )}
@@ -429,13 +429,13 @@ export function Teasers({
           RIDDLE {safeIndex + 1}
         </div>
 
-        <p className="relative mt-3 font-display text-[19px] font-semibold leading-[1.4] text-[#f3f7ff] [overflow-wrap:anywhere] sm:text-[21px]">
+        <p className="relative mt-2 font-display text-[16px] font-semibold leading-[1.35] text-[#f3f7ff] [overflow-wrap:anywhere] sm:mt-3 sm:text-[21px] sm:leading-[1.4]">
           {riddle.question}
         </p>
 
         {/* Options */}
         <div
-          className="relative mt-4 flex flex-col gap-2 sm:gap-2.5"
+          className="relative mt-3 flex flex-col gap-1.5 sm:mt-4 sm:gap-2.5"
           role="radiogroup"
           aria-label="Answer choices"
         >
@@ -487,7 +487,7 @@ export function Teasers({
                 disabled={answered}
                 onClick={() => select(i)}
                 className={cn(
-                  "flex min-h-[52px] w-full items-center gap-3 rounded-xl border px-4 py-3 text-left font-display text-[15px] font-medium transition-all duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 active:scale-[0.99]",
+                  "flex min-h-[44px] w-full items-center gap-2.5 rounded-xl border px-3.5 py-2 text-left font-display text-[14px] font-medium transition-all duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 active:scale-[0.99] sm:min-h-[52px] sm:gap-3 sm:px-4 sm:py-3 sm:text-[15px]",
                   answered ? "cursor-default" : "cursor-pointer",
                   pulse && "animate-solve",
                   !answered && !isPending && !reducedMotion && "animate-rise",
@@ -514,7 +514,7 @@ export function Teasers({
                 }}
               >
                 <span
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md font-mono text-[11px] font-semibold transition-colors duration-200"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md font-mono text-[11px] font-semibold transition-colors duration-200 sm:h-7 sm:w-7"
                   style={{
                     background:
                       answered && isThisCorrect
@@ -548,7 +548,7 @@ export function Teasers({
         {answered && (
           <div
             className={cn(
-              "relative mt-[18px] rounded-xl border p-3.5",
+              "relative mt-3 rounded-xl border p-3 sm:mt-[18px] sm:p-3.5",
               !reducedMotion && "animate-rise",
             )}
             style={{
@@ -562,7 +562,7 @@ export function Teasers({
             >
               {isCorrect ? "✓ NICE" : "💡 THE AHA"}
             </div>
-            <p className="mt-2 text-[13.5px] leading-[1.55] text-[rgba(226,234,255,0.82)] [overflow-wrap:anywhere]">
+            <p className="mt-1.5 max-h-[22vh] overflow-y-auto text-[13px] leading-[1.5] text-[rgba(226,234,255,0.82)] [overflow-wrap:anywhere] sm:mt-2 sm:text-[13.5px] sm:leading-[1.55]">
               {riddle.aha}
             </p>
           </div>
@@ -574,7 +574,7 @@ export function Teasers({
           <button
             type="button"
             onClick={() => commit(pending)}
-            className="relative mt-[14px] min-h-[48px] w-full rounded-xl py-3.5 font-display text-[14px] font-semibold text-[#04060f] transition-all active:scale-[0.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            className="relative mt-2.5 min-h-[44px] w-full rounded-xl py-2.5 font-display text-[14px] font-semibold text-[#04060f] transition-all active:scale-[0.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 sm:mt-[14px] sm:min-h-[48px] sm:py-3.5"
             style={{
               backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`,
               boxShadow: `0 10px 30px ${ACCENT.solid}38`,
@@ -591,7 +591,7 @@ export function Teasers({
             type="button"
             onClick={advance}
             className={cn(
-              "relative mt-[14px] min-h-[48px] w-full rounded-xl py-3.5 font-display text-[14px] font-semibold text-[#04060f] transition-all active:scale-[0.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
+              "relative mt-2.5 min-h-[44px] w-full rounded-xl py-2.5 font-display text-[14px] font-semibold text-[#04060f] transition-all active:scale-[0.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 sm:mt-[14px] sm:min-h-[48px] sm:py-3.5",
               !reducedMotion && "animate-rise",
             )}
             style={{
@@ -606,7 +606,7 @@ export function Teasers({
 
         {/* Hint (before locking in): how to select / confirm */}
         {!answered && (
-          <p className="relative mt-4 text-center font-mono text-[10px] tracking-[0.1em] text-ink-faint">
+          <p className="relative mt-2.5 text-center font-mono text-[10px] tracking-[0.1em] text-ink-faint sm:mt-4">
             {pending === -1 ? (
               <>
                 <span className="max-sm:hidden">TAP A CHOICE · OR PRESS A–D / 1–4</span>

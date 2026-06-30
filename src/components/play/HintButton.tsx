@@ -34,8 +34,8 @@ export function HintButton({
       disabled={disabled || out}
       aria-label={out ? "No hints left" : `Use a hint, ${left} of ${max} remaining`}
       className={cn(
-        "inline-flex min-h-[44px] items-center gap-1.5 rounded-pill border px-4 py-2.5",
-        "font-display text-[13.5px] transition-colors active:scale-95",
+        "inline-flex min-h-[38px] items-center gap-1.5 rounded-pill border px-3.5 py-2 sm:min-h-[44px] sm:px-4 sm:py-2.5",
+        "font-display text-[12.5px] transition-colors active:scale-95 sm:text-[13.5px]",
         "disabled:cursor-not-allowed disabled:opacity-40",
         className,
       )}

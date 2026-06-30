@@ -168,7 +168,7 @@ export function Connections({
   const { ref: gridFitRef, size: gridSize } = useFitBox<HTMLDivElement>(
     GRID_COLS * 1.3,
     gridRows,
-    420,
+    380,
   );
 
   const maxMistakes = maxMistakesFor(puzzle);
@@ -625,7 +625,7 @@ export function Connections({
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       <p
-        className="mb-1.5 shrink-0 text-center font-mono text-[10.5px] tracking-[0.16em]"
+        className="mb-1 shrink-0 text-center font-mono text-[10.5px] tracking-[0.16em] sm:mb-1.5"
         style={{ color: ACCENT.soft }}
       >
         CREATE FOUR GROUPS OF FOUR
@@ -633,7 +633,7 @@ export function Connections({
 
       {/* message / status area (live region) */}
       <div
-        className="flex min-h-[24px] shrink-0 items-center justify-center px-2 text-center font-mono text-[12.5px] tracking-[0.03em]"
+        className="flex min-h-[20px] shrink-0 items-center justify-center px-2 text-center font-mono text-[12px] tracking-[0.03em] sm:min-h-[24px] sm:text-[12.5px]"
         style={{ color: messageColor }}
         aria-live="polite"
         role="status"
@@ -656,7 +656,7 @@ export function Connections({
       >
         {/* solved categories */}
         {solvedOrder.length > 0 && (
-          <div className="mb-2 flex shrink-0 flex-col gap-2">
+          <div className="mb-1.5 flex shrink-0 flex-col gap-1.5 sm:mb-2 sm:gap-2">
             {solvedOrder.map((gi, order) => {
               const g = puzzle.groups[gi];
               const isFresh = gi === justSolved && !reducedMotion;
@@ -670,7 +670,7 @@ export function Connections({
                   key={g.label}
                   role="group"
                   className={cn(
-                    "rounded-xl px-3 py-2.5",
+                    "rounded-xl px-3 py-2 sm:py-2.5",
                     !revealedNotSolved && isFresh && "animate-solve",
                     !reducedMotion && !revealedNotSolved && !isFresh && "animate-pop",
                   )}
@@ -721,7 +721,7 @@ export function Connections({
                     )}
                   </div>
                   <div
-                    className="mt-0.5 break-words font-display text-[14.5px] font-semibold leading-snug"
+                    className="mt-0.5 break-words font-display text-[13.5px] font-semibold leading-snug sm:text-[14.5px]"
                     style={{
                       color: revealedNotSolved ? "rgba(226,234,255,0.62)" : "#04060f",
                       textDecoration: revealedNotSolved ? "line-through" : undefined,
@@ -817,7 +817,7 @@ export function Connections({
         {/* last-guess warning: surface the stakes before the final allowed miss */}
         {lastGuess && (
           <div
-            className="mt-3 flex shrink-0 items-center justify-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em]"
+            className="mt-2 flex shrink-0 items-center justify-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] sm:mt-3"
             style={{ color: "#ff9bbf" }}
             role="status"
           >
@@ -828,7 +828,7 @@ export function Connections({
 
         {/* mistakes tracker */}
         {!won && (
-          <div className={cn("flex shrink-0 items-center justify-center gap-2.5", lastGuess ? "mt-2" : "mt-3")}>
+          <div className={cn("flex shrink-0 items-center justify-center gap-2.5", lastGuess ? "mt-1.5 sm:mt-2" : "mt-2 sm:mt-3")}>
             <span
               className="font-mono text-[11.5px]"
               style={{ color: "rgba(226,234,255,0.55)" }}
@@ -863,12 +863,12 @@ export function Connections({
         {/* actions */}
         {!gameOver && (
           <>
-          <div className="mt-3 flex shrink-0 flex-wrap items-center justify-center gap-2.5">
+          <div className="mt-2 flex shrink-0 flex-wrap items-center justify-center gap-1.5 sm:mt-3 sm:gap-2.5">
             <button
               type="button"
               onClick={shuffle}
               disabled={busy}
-              className="min-h-[44px] rounded-pill border border-white/20 px-5 py-2.5 font-display text-sm text-[#eaf1ff] transition-colors duration-150 hover:border-white/35 hover:bg-white/[0.07] active:scale-[0.97] disabled:opacity-40"
+              className="min-h-[38px] rounded-pill border border-white/20 px-4 py-2 font-display text-[13.5px] text-[#eaf1ff] transition-colors duration-150 hover:border-white/35 hover:bg-white/[0.07] active:scale-[0.97] disabled:opacity-40 sm:min-h-[44px] sm:px-5 sm:py-2.5 sm:text-sm"
               style={{ background: "rgba(255,255,255,0.04)" }}
             >
               Shuffle
@@ -877,7 +877,7 @@ export function Connections({
               type="button"
               onClick={deselect}
               disabled={busy || selected.length === 0}
-              className="min-h-[44px] rounded-pill border border-white/20 px-5 py-2.5 font-display text-sm text-[#eaf1ff] transition-colors duration-150 hover:border-white/35 hover:bg-white/[0.07] active:scale-[0.97] disabled:opacity-40 disabled:hover:border-white/20 disabled:hover:bg-white/[0.04]"
+              className="min-h-[38px] rounded-pill border border-white/20 px-4 py-2 font-display text-[13.5px] text-[#eaf1ff] transition-colors duration-150 hover:border-white/35 hover:bg-white/[0.07] active:scale-[0.97] disabled:opacity-40 disabled:hover:border-white/20 disabled:hover:bg-white/[0.04] sm:min-h-[44px] sm:px-5 sm:py-2.5 sm:text-sm"
               style={{ background: "rgba(255,255,255,0.04)" }}
             >
               Deselect all
@@ -900,7 +900,7 @@ export function Connections({
                     ? "Submit your group of four — this is your last guess"
                     : "Submit your group of four"
               }
-              className="min-h-[44px] rounded-pill px-6 py-2.5 font-display text-sm font-semibold transition-all duration-200 active:scale-[0.97]"
+              className="min-h-[38px] rounded-pill px-5 py-2 font-display text-[13.5px] font-semibold transition-all duration-200 active:scale-[0.97] sm:min-h-[44px] sm:px-6 sm:py-2.5 sm:text-sm"
               style={
                 selectionFull
                   ? {
@@ -928,7 +928,7 @@ export function Connections({
           </div>
 
           {/* Give up: an explicit, two-step exit so a stuck player is never trapped. */}
-          <div className="mt-2 flex shrink-0 justify-center">
+          <div className="mt-1.5 flex shrink-0 justify-center sm:mt-2">
             {confirmGiveUp ? (
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[11px] tracking-[0.06em]" style={{ color: "rgba(226,234,255,0.6)" }}>
@@ -970,7 +970,7 @@ export function Connections({
           <button
             type="button"
             onClick={() => setShowModal(true)}
-            className="mt-4 min-h-[44px] w-full shrink-0 rounded-pill border px-5 py-2.5 font-display text-sm font-semibold transition-transform duration-150 active:scale-[0.98]"
+            className="mt-3 min-h-[44px] w-full shrink-0 rounded-pill border px-5 py-2.5 font-display text-sm font-semibold transition-transform duration-150 active:scale-[0.98] sm:mt-4"
             style={{
               color: ACCENT.solid,
               borderColor: `${ACCENT.solid}55`,

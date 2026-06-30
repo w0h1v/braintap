@@ -137,9 +137,12 @@ export function Sudoku({
 
   // Size the square 6×6 board to the height left between the fixed meta/progress
   // chrome and the numpad/controls, so board + all controls fit the viewport
-  // without scrolling on phones. 380 keeps the desktop max in step with the
-  // prior max-w-[min(92vw,380px)].
-  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(N, N, 380);
+  // without scrolling on phones. 320 caps the board so it never out-competes the
+  // fixed controls for height on short screens (iPhone SE): a 320px 6×6 board is
+  // still ~53px/cell — comfortably tappable — while giving back the vertical
+  // slack the control stack needs. The flex-1 region still grows the board to
+  // this cap on larger screens.
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(N, N, 320);
 
   // Capture the current mutable board into a serialisable snapshot.
   const snapshot = useCallback(
@@ -537,7 +540,7 @@ export function Sudoku({
       {/* meta row: difficulty + progress + timer */}
       <div
         className={cn(
-          "mb-3 flex w-full shrink-0 items-center justify-between font-mono text-[11px] text-ink-mute",
+          "mb-2 flex w-full shrink-0 items-center justify-between font-mono text-[11px] text-ink-mute",
           !reducedMotion && "animate-rise",
         )}
         style={{ maxWidth: "min(92vw, 380px)" }}
@@ -567,7 +570,7 @@ export function Sudoku({
 
       {/* progress bar */}
       <div
-        className="mb-3 h-1 w-full shrink-0 overflow-hidden rounded-pill bg-white/[0.06]"
+        className="mb-2 h-1 w-full shrink-0 overflow-hidden rounded-pill bg-white/[0.06]"
         style={{ maxWidth: "min(92vw, 380px)" }}
         role="presentation"
       >
@@ -584,7 +587,7 @@ export function Sudoku({
           next edit), so the state isn't conveyed by a single 500ms shake. */}
       {wrongCells.size > 0 && !won && (
         <div
-          className="mb-3 w-full shrink-0 rounded-xl border px-3.5 py-2.5 text-center font-display text-[12.5px] leading-snug"
+          className="mb-2 w-full shrink-0 rounded-xl border px-3 py-1.5 text-center font-display text-[12px] leading-snug"
           style={{
             maxWidth: "min(92vw, 380px)",
             color: CONFLICT,
@@ -731,7 +734,7 @@ export function Sudoku({
 
       {/* numpad */}
       <div
-        className="mt-4 grid w-full shrink-0 grid-cols-6 gap-1.5"
+        className="mt-2.5 grid w-full shrink-0 grid-cols-6 gap-1.5"
         style={{ maxWidth: "min(92vw, 380px)" }}
       >
         {[1, 2, 3, 4, 5, 6].map((n) => {
@@ -744,7 +747,7 @@ export function Sudoku({
               onClick={() => inputDigit(n)}
               disabled={disabled}
               className={cn(
-                "flex h-[clamp(48px,13vw,56px)] items-center justify-center rounded-[10px] font-display text-xl font-semibold text-[#eafcff] outline-none",
+                "flex h-[clamp(42px,11vw,52px)] items-center justify-center rounded-[10px] font-display text-xl font-semibold text-[#eafcff] outline-none",
                 !reducedMotion && "transition-transform active:scale-90",
                 disabled ? "opacity-35" : "active:opacity-90",
               )}
@@ -760,9 +763,12 @@ export function Sudoku({
         })}
       </div>
 
-      {/* undo / redo */}
+      {/* controls — undo/redo/notes/erase/hint combined into a single compact
+          row so the board + every control fits a short (iPhone SE) viewport
+          without scrolling. Buttons stay ≥40px tall (above the dense-cluster
+          floor) and keep their full aria labels. */}
       <div
-        className="mt-3 flex w-full shrink-0 items-center justify-center gap-3"
+        className="mt-2 flex w-full shrink-0 items-stretch justify-center gap-1.5"
         style={{ maxWidth: "min(92vw, 380px)" }}
       >
         <button
@@ -771,12 +777,12 @@ export function Sudoku({
           disabled={won || undoStack.length === 0}
           aria-label="Undo"
           className={cn(
-            "min-h-[44px] flex-1 rounded-pill border border-line-strong px-5 py-2.5 font-display text-[13.5px] text-[#eaf1ff] outline-none disabled:opacity-40",
+            "flex h-10 flex-[0.7] items-center justify-center rounded-pill border border-line-strong px-2 font-display text-[15px] text-[#eaf1ff] outline-none disabled:opacity-40 sm:h-11",
             !reducedMotion && "transition-colors active:scale-[0.98]",
           )}
           style={{ background: "rgba(255,255,255,0.04)" }}
         >
-          ↶ Undo
+          ↶
         </button>
         <button
           type="button"
@@ -784,27 +790,21 @@ export function Sudoku({
           disabled={won || redoStack.length === 0}
           aria-label="Redo"
           className={cn(
-            "min-h-[44px] flex-1 rounded-pill border border-line-strong px-5 py-2.5 font-display text-[13.5px] text-[#eaf1ff] outline-none disabled:opacity-40",
+            "flex h-10 flex-[0.7] items-center justify-center rounded-pill border border-line-strong px-2 font-display text-[15px] text-[#eaf1ff] outline-none disabled:opacity-40 sm:h-11",
             !reducedMotion && "transition-colors active:scale-[0.98]",
           )}
           style={{ background: "rgba(255,255,255,0.04)" }}
         >
-          ↷ Redo
+          ↷
         </button>
-      </div>
-
-      {/* controls */}
-      <div
-        className="mt-3 flex w-full shrink-0 items-center justify-center gap-3"
-        style={{ maxWidth: "min(92vw, 380px)" }}
-      >
         <button
           type="button"
           onClick={() => setNotesMode((m) => !m)}
           aria-pressed={notesMode}
+          aria-label={`Notes mode ${notesMode ? "on" : "off"}`}
           disabled={won}
           className={cn(
-            "min-h-[44px] flex-1 rounded-pill border px-5 py-2.5 font-display text-[13.5px] outline-none disabled:opacity-40",
+            "flex h-10 flex-[1.4] items-center justify-center rounded-pill border px-2 font-display text-[13px] outline-none disabled:opacity-40 sm:h-11 sm:text-[13.5px]",
             !reducedMotion && "transition-colors active:scale-[0.98]",
           )}
           style={
@@ -821,14 +821,14 @@ export function Sudoku({
                 }
           }
         >
-          Notes · {notesMode ? "On" : "Off"}
+          Notes {notesMode ? "On" : "Off"}
         </button>
         <button
           type="button"
           onClick={erase}
           disabled={won || selected == null || (selected != null && puzzle.given[selected])}
           className={cn(
-            "min-h-[44px] flex-1 rounded-pill border border-line-strong px-5 py-2.5 font-display text-[13.5px] text-[#eaf1ff] outline-none disabled:opacity-40",
+            "flex h-10 flex-1 items-center justify-center rounded-pill border border-line-strong px-2 font-display text-[13px] text-[#eaf1ff] outline-none disabled:opacity-40 sm:h-11 sm:text-[13.5px]",
             !reducedMotion && "transition-colors active:scale-[0.98]",
           )}
           style={{ background: "rgba(255,255,255,0.04)" }}
@@ -841,6 +841,7 @@ export function Sudoku({
           onHint={handleHint}
           accent={ACCENT}
           disabled={won}
+          className="!min-h-0 h-10 flex-[1.4] justify-center !gap-1 !px-2 !text-[13px] sm:h-11 sm:!text-[13.5px]"
         />
       </div>
 
@@ -851,7 +852,7 @@ export function Sudoku({
           type="button"
           onClick={revealSolution}
           className={cn(
-            "mt-3 shrink-0 rounded-pill px-4 py-2 font-display text-[12.5px] text-ink-mute outline-none",
+            "mt-2 shrink-0 rounded-pill px-4 py-1.5 font-display text-[12px] text-ink-mute outline-none",
             !reducedMotion && "transition-colors active:scale-[0.98]",
           )}
           style={{ background: "transparent" }}
