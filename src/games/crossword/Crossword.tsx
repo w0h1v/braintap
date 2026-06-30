@@ -6,6 +6,7 @@ import { GAME_METAS } from "@/games/_meta";
 import { CompletionModal } from "@/components/play/CompletionModal";
 import { HintButton } from "@/components/play/HintButton";
 import { useGameClock } from "@/lib/useGameClock";
+import { useFitBox } from "@/lib/useFitBox";
 import { formatClock } from "@/lib/share";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
@@ -101,6 +102,11 @@ export function Crossword({
   );
 
   const clock = useGameClock(!won, saved?.elapsedMs ?? 0);
+
+  // Size the square grid to the height left between the fixed chrome (meta row,
+  // progress bar, clue strip, keyboard, controls) so the whole game fits the
+  // viewport on phones without scrolling. Caps at the prior desktop max (380px).
+  const { ref: gridFitRef, size: gridSize } = useFitBox<HTMLDivElement>(size, size, 380);
 
   // --- derived selection helpers -------------------------------------------
 
@@ -512,7 +518,7 @@ export function Crossword({
   const gridMax = "min(92vw, 380px)";
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       <p className="sr-only" role="status" aria-live="polite">
         {status}
       </p>
@@ -520,7 +526,7 @@ export function Crossword({
       {/* meta row */}
       <div
         className={cn(
-          "mb-3 flex w-full items-center justify-between font-mono text-[11px] text-ink-mute",
+          "mb-2 flex w-full shrink-0 items-center justify-between font-mono text-[11px] text-ink-mute",
           !reducedMotion && "animate-rise",
         )}
         style={{ maxWidth: gridMax }}
@@ -547,7 +553,7 @@ export function Crossword({
 
       {/* progress bar */}
       <div
-        className="mb-3 h-1 w-full overflow-hidden rounded-pill bg-white/[0.06]"
+        className="mb-2 h-1 w-full shrink-0 overflow-hidden rounded-pill bg-white/[0.06]"
         style={{ maxWidth: gridMax }}
         role="presentation"
       >
@@ -560,14 +566,20 @@ export function Crossword({
         />
       </div>
 
-      {/* grid */}
+      {/* grid — flexes to fill the height left between the fixed chrome, sized
+          square by useFitBox so board + keyboard + clue strip fit (no scroll). */}
+      <div
+        ref={gridFitRef}
+        className="flex min-h-0 w-full flex-1 items-center justify-center"
+      >
       <div
         className={cn(
-          "grid aspect-square w-full overflow-hidden rounded-2xl border-2",
+          "grid overflow-hidden rounded-2xl border-2",
           shake && !reducedMotion && "animate-shake",
         )}
         style={{
-          maxWidth: gridMax,
+          width: gridSize?.w,
+          height: gridSize?.h,
           gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
           borderColor: `${ACCENT.solid}66`,
           background: `${ACCENT.solid}1a`,
@@ -682,6 +694,7 @@ export function Crossword({
           </div>
         ))}
       </div>
+      </div>
 
       {/* transient toast for failed full-grid submits */}
       {toast && (
@@ -689,7 +702,7 @@ export function Crossword({
           role="status"
           aria-live="polite"
           className={cn(
-            "mt-3 w-full rounded-xl border px-3 py-2 text-center font-display text-[12.5px]",
+            "mt-2 w-full shrink-0 rounded-xl border px-3 py-2 text-center font-display text-[12.5px]",
             !reducedMotion && "animate-rise",
           )}
           style={{
@@ -705,7 +718,7 @@ export function Crossword({
 
       {/* active clue strip */}
       <div
-        className="mt-4 flex w-full items-stretch gap-1.5"
+        className="mt-2 flex w-full shrink-0 items-stretch gap-1.5"
         style={{ maxWidth: gridMax }}
       >
         <button
@@ -758,7 +771,7 @@ export function Crossword({
       </div>
 
       {/* on-screen keyboard */}
-      <div className="mt-3 flex w-full flex-col gap-1.5" style={{ maxWidth: gridMax }}>
+      <div className="mt-2 flex w-full shrink-0 flex-col gap-1.5" style={{ maxWidth: gridMax }}>
         {KEY_ROWS.map((row, ri) => (
           <div key={ri} className="flex justify-center gap-[3px]">
             {ri === 2 && (
@@ -821,7 +834,7 @@ export function Crossword({
 
       {/* controls: check toggle + hint */}
       <div
-        className="mt-3 flex w-full items-center justify-center gap-3"
+        className="mt-2 flex w-full shrink-0 items-center justify-center gap-3"
         style={{ maxWidth: gridMax }}
       >
         <button

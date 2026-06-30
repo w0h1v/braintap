@@ -7,6 +7,7 @@ import { CompletionModal } from "@/components/play/CompletionModal";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useFitBox } from "@/lib/useFitBox";
 import {
   INITIAL_LEVEL,
   GRID,
@@ -106,6 +107,10 @@ export function Vault({
 
   const level = levelForRound(round, initialLevel);
   const pattern = puzzle.rounds[Math.min(round, maxRounds) - 1];
+
+  // Size the square board to the height left between the fixed header/status and
+  // the controls below it, so board + controls fit the viewport (no scroll).
+  const { ref: fitRef, size: boardSize } = useFitBox<HTMLDivElement>(grid, grid, 420);
 
   // Load the personal best for the active tier (and refresh on tier switch).
   useEffect(() => {
@@ -346,9 +351,9 @@ export function Vault({
   const buttonVisible = (phase === "idle" || phase === "cleared") && !ended;
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       {/* Status header: round + progress dots */}
-      <div className="mb-2.5 flex w-full max-w-[420px] items-center justify-between font-mono text-[10.5px] tracking-[0.12em]">
+      <div className="mb-2.5 flex w-full max-w-[420px] shrink-0 items-center justify-between font-mono text-[10.5px] tracking-[0.12em]">
         <span className="flex items-center gap-2" style={{ color: ACCENT.soft }}>
           <span>
             ROUND {Math.min(round, maxRounds)}/{maxRounds} · {level} CELLS
@@ -391,7 +396,7 @@ export function Vault({
       <div
         role="status"
         aria-live="polite"
-        className="mb-2.5 flex min-h-[24px] items-center justify-center text-center font-mono text-[13px]"
+        className="mb-2.5 flex min-h-[24px] shrink-0 items-center justify-center text-center font-mono text-[13px]"
         style={{ color: phase === "over" && !won ? BAD : ACCENT.soft }}
       >
         {message}
@@ -399,7 +404,7 @@ export function Vault({
 
       {/* Show-phase countdown bar (visual cue that memorize time is ticking) */}
       <div
-        className="mb-3 h-[3px] w-full max-w-[min(92vw,420px)] overflow-hidden rounded-full"
+        className="mb-3 h-[3px] w-full max-w-[min(92vw,420px)] shrink-0 overflow-hidden rounded-full"
         style={{ background: "rgba(255,255,255,0.06)" }}
         aria-hidden="true"
       >
@@ -416,16 +421,27 @@ export function Vault({
         )}
       </div>
 
+      {/* Board region — flexes to the height left between the fixed header/status
+          and the controls below, sized square so the whole game fits (no scroll). */}
+      <div
+        ref={fitRef}
+        className="flex min-h-0 w-full flex-1 items-center justify-center"
+      >
       {/* Grid */}
       <div
         className={cn(
           // Smaller gap when the board is large (hard 6×6) so cells stay square
           // and tappable on ~320px phones; roomier gap on the 4×4 / 5×5 tiers.
-          "grid w-full max-w-[min(92vw,420px)]",
+          "grid",
           grid >= 6 ? "gap-[1.4vw] sm:gap-[7px]" : "gap-[2.2vw] sm:gap-[9px]",
           shake && !reducedMotion && "animate-shake",
         )}
-        style={{ gridTemplateColumns: `repeat(${grid}, 1fr)` }}
+        style={{
+          width: boardSize?.w,
+          height: boardSize?.h,
+          gridTemplateColumns: `repeat(${grid}, 1fr)`,
+          gridTemplateRows: `repeat(${grid}, 1fr)`,
+        }}
         role="grid"
         aria-label={
           phase === "show"
@@ -548,7 +564,11 @@ export function Vault({
           );
         })}
       </div>
+      </div>
 
+      {/* Controls beneath the board — pinned so they always stay on-screen while
+          the board above flexes to fill the remaining height. */}
+      <div className="flex w-full shrink-0 flex-col items-center">
       {/* Intro / instructions — only before the very first sequence */}
       {phase === "idle" && !hasStarted && !ended && (
         <p className="mt-4 max-w-[340px] text-center font-mono text-[11.5px] leading-relaxed text-ink-faint">
@@ -565,7 +585,7 @@ export function Vault({
           onClick={() => startRound()}
           aria-label={`${buttonLabel}, memorize ${level} cells`}
           className={cn(
-            "mt-6 rounded-xl px-8 py-3.5 font-display text-[15px] font-semibold text-[#04060f]",
+            "mt-4 rounded-xl px-8 py-3.5 font-display text-[15px] font-semibold text-[#04060f]",
             reducedMotion ? "" : "transition-transform active:scale-95",
             reducedMotion ? "" : "animate-pop",
           )}
@@ -580,13 +600,13 @@ export function Vault({
 
       {/* Show / input phases: keep layout height stable with a quiet hint */}
       {(phase === "show" || phase === "input") && (
-        <p className="mt-6 h-[20px] text-center font-mono text-[11px] text-ink-faint">
+        <p className="mt-4 h-[20px] text-center font-mono text-[11px] text-ink-faint">
           {phase === "show" ? "Hold the shape in mind…" : "Tap the cells you saw"}
         </p>
       )}
 
       {ended && (
-        <div className="mt-6 flex items-center gap-2.5">
+        <div className="mt-4 flex items-center gap-2.5">
           {/* Instant retry of the same tier — the core retention hook for a
               short memory game. */}
           <button
@@ -617,6 +637,7 @@ export function Vault({
           </button>
         </div>
       )}
+      </div>
 
       <CompletionModal
         open={showModal}

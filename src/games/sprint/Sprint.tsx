@@ -7,6 +7,7 @@ import { CompletionModal } from "@/components/play/CompletionModal";
 import { rngFromString } from "@/lib/rng";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
+import { useFitBox } from "@/lib/useFitBox";
 import { cn } from "@/lib/cn";
 import {
   CELLS,
@@ -97,6 +98,16 @@ export function Sprint({
   const [scorePops, setScorePops] = useState<number[]>([]);
   // Screen-reader live status; kept as state so announcements actually fire.
   const [liveStatus, setLiveStatus] = useState("");
+
+  // Size the 4×4 board to the height left between the fixed stats/meter chrome
+  // and the controls below, so board + controls fit the viewport (no scroll).
+  // The board is the flex-1 slack absorber, so a tighter cap (vs round 1's 332)
+  // is the largest single lever for fitting board + chrome on a short phone.
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(
+    GRID_SIZE,
+    GRID_SIZE,
+    268,
+  );
 
   const deadlineRef = useRef<number | null>(null);
   const refillRef = useRef(refillPtr);
@@ -416,11 +427,11 @@ export function Sprint({
   const showStart = phase === "idle" || phase === "done";
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       {/* stats bar. When the host owns the unified timer we suppress our own
           SECONDS chip (timing logic is untouched) and show the win goal so the
           player still knows the per-tier clear target. */}
-      <div className="grid w-full max-w-[420px] grid-cols-3 gap-2.5">
+      <div className="grid w-full max-w-[420px] shrink-0 grid-cols-3 gap-2 sm:gap-2.5">
         <StatCard
           value={phase === "idle" ? "—" : String(target)}
           label="TARGET"
@@ -450,7 +461,7 @@ export function Sprint({
       </div>
 
       {/* selection status + sum meter */}
-      <div className="mt-4 flex w-full max-w-[420px] flex-col items-center gap-1.5">
+      <div className="mt-2.5 flex w-full max-w-[420px] shrink-0 flex-col items-center gap-1.5 sm:mt-4">
         <div className="flex items-center gap-2 font-mono text-[12px] text-[rgba(226,234,255,0.55)]">
           <span>
             Selected sum:{" "}
@@ -501,13 +512,24 @@ export function Sprint({
         {liveStatus}
       </p>
 
-      {/* grid */}
+      {/* grid — flexes to the height left between the fixed stats/meter chrome
+          and the controls below, sized square by useFitBox so it fits the
+          viewport (no scroll). */}
+      <div
+        ref={boardFitRef}
+        className="mt-2.5 flex min-h-0 w-full flex-1 items-center justify-center sm:mt-4"
+      >
       <div
         className={cn(
-          "relative mt-4 grid grid-cols-4 gap-2",
+          "relative grid gap-2",
           shake && !reducedMotion && "animate-shake",
         )}
-        style={{ width: "min(92vw, 332px)" }}
+        style={{
+          width: boardSize?.w,
+          height: boardSize?.h,
+          gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
+          gridTemplateRows: `repeat(${GRID_SIZE}, 1fr)`,
+        }}
         role="grid"
         aria-label="Number grid"
       >
@@ -529,7 +551,7 @@ export function Sprint({
               onFocus={() => setFocusIdx(i)}
               onClick={() => toggleCell(i)}
               className={cn(
-                "flex aspect-square items-center justify-center rounded-xl font-display font-semibold",
+                "flex h-full w-full items-center justify-center rounded-xl font-display font-semibold",
                 "select-none border",
                 !reducedMotion && "transition-[transform,background,box-shadow,border-color] duration-150",
                 !reducedMotion && isPop && "animate-pop",
@@ -539,7 +561,6 @@ export function Sprint({
               )}
               style={{
                 fontSize: "clamp(20px, 6.5vw, 26px)",
-                minHeight: 44,
                 color: isSel ? "#04140d" : "#eafcff",
                 background: isSel
                   ? `linear-gradient(160deg, ${ACCENT.from}, ${ACCENT.to})`
@@ -555,17 +576,18 @@ export function Sprint({
           );
         })}
       </div>
+      </div>
 
       {/* start / replay overlay + instructions */}
       {showStart ? (
         <div
           className={cn(
-            "mt-6 flex w-full max-w-[332px] flex-col items-center",
+            "mt-2.5 flex w-full max-w-[332px] shrink-0 flex-col items-center sm:mt-4",
             !reducedMotion && "animate-rise",
           )}
         >
           {phase === "idle" && (
-            <p className="mb-4 px-2 text-center font-display text-[13.5px] leading-relaxed text-[rgba(226,234,255,0.62)]">
+            <p className="mb-2.5 px-2 text-center font-display text-[12.5px] leading-snug text-[rgba(226,234,255,0.62)] sm:mb-4 sm:text-[13.5px] sm:leading-relaxed">
               Tap cells that{" "}
               <span style={{ color: ACCENT.solid }}>add up to the target</span> before the{" "}
               {DURATION_SEC}-second clock runs out. Go too high and only that last tap is undone —
@@ -576,7 +598,7 @@ export function Sprint({
             type="button"
             onClick={start}
             className={cn(
-              "rounded-xl px-9 py-3.5 font-display text-[15px] font-semibold text-[#04060f]",
+              "rounded-xl px-9 py-2.5 font-display text-[15px] font-semibold text-[#04060f] sm:py-3.5",
               !reducedMotion && "transition-transform duration-200 hover:-translate-y-0.5",
               "active:scale-95",
             )}
@@ -589,13 +611,13 @@ export function Sprint({
           </button>
         </div>
       ) : (
-        <div className="mt-6 flex w-full max-w-[332px] flex-col items-center gap-3">
+        <div className="mt-2.5 flex w-full max-w-[332px] shrink-0 flex-col items-center gap-2 sm:mt-4 sm:gap-3">
           <button
             type="button"
             onClick={clearSelection}
             disabled={selected.size === 0}
             className={cn(
-              "rounded-xl border px-5 py-2 font-display text-[13px] font-semibold",
+              "min-h-[40px] rounded-xl border px-5 py-2 font-display text-[13px] font-semibold sm:min-h-0",
               !reducedMotion && "transition-[opacity,transform] duration-150 active:scale-95",
               selected.size === 0
                 ? "cursor-default opacity-40"
@@ -606,7 +628,7 @@ export function Sprint({
           >
             Clear selection
           </button>
-          <p className="max-w-[332px] text-center font-mono text-[10.5px] tracking-[0.08em] text-ink-faint">
+          <p className="max-w-[332px] text-center font-mono text-[10px] leading-snug tracking-[0.08em] text-ink-faint sm:text-[10.5px]">
             TAP CELLS THAT SUM TO THE TARGET · TOO HIGH UNDOES THE LAST TAP
           </p>
         </div>
@@ -661,7 +683,7 @@ function StatCard({
   return (
     <div
       className={cn(
-        "relative flex flex-col items-center justify-center overflow-hidden rounded-2xl px-2 py-3",
+        "relative flex flex-col items-center justify-center overflow-hidden rounded-2xl px-2 py-2 sm:py-3",
         pulse && "animate-pulse2",
       )}
       style={{
@@ -672,13 +694,13 @@ function StatCard({
       }}
     >
       <div
-        className="font-display text-[34px] font-semibold leading-none transition-colors duration-150"
+        className="font-display text-[28px] font-semibold leading-none transition-colors duration-150 sm:text-[34px]"
         style={{ color: flash && flashColor ? flashColor : color }}
       >
         {value}
       </div>
       <div
-        className="mt-1.5 font-mono text-[9.5px] tracking-[0.14em]"
+        className="mt-1 font-mono text-[9.5px] tracking-[0.14em] sm:mt-1.5"
         style={{ color: accentBorder ? ACCENT.soft : "rgba(226,234,255,0.45)" }}
       >
         {label}

@@ -6,6 +6,7 @@ import { GAME_METAS } from "@/games/_meta";
 import { CompletionModal } from "@/components/play/CompletionModal";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
+import { useFitBox } from "@/lib/useFitBox";
 import { cn } from "@/lib/cn";
 import {
   SIZE,
@@ -684,6 +685,12 @@ export function G2048({
     }
   })();
 
+  // Size the square board to the height left between the fixed chrome (header,
+  // score cards, progress, status, dir-pad, undo/restart) and the viewport, so
+  // the whole game fits on a phone without scrolling. SIZE×SIZE = 4×4; 332 is
+  // the prior desktop max board width.
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(SIZE, SIZE, 332);
+
   // Geometry for the absolutely-positioned tile layer. Cells are laid out on a
   // 4×4 grid inside a square board with a fixed gap and inset padding; tiles are
   // positioned via percentage left/top and animated with CSS transitions.
@@ -692,7 +699,7 @@ export function G2048({
   const cellPos = (n: number) => GAP_PCT + n * (cellPct + GAP_PCT);
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       <p className="sr-only" aria-live="polite">
         {srStatus}
       </p>
@@ -700,13 +707,13 @@ export function G2048({
       {/* Header: title + how-to-play hint */}
       <div
         className={cn(
-          "flex w-[min(92vw,332px)] flex-col items-center",
+          "flex w-[min(92vw,332px)] shrink-0 flex-col items-center",
           !reducedMotion && "animate-rise",
         )}
       >
-        <h1 className="font-display text-[20px] font-semibold text-[#f3f7ff]">2048</h1>
+        <h1 className="font-display text-[17px] font-semibold leading-none text-[#f3f7ff] sm:text-[20px]">2048</h1>
         <p
-          className="mt-0.5 font-mono text-[10.5px] tracking-[0.16em]"
+          className="mt-0.5 font-mono text-[9.5px] tracking-[0.16em] sm:text-[10.5px]"
           style={{ color: ACCENT.soft }}
         >
           MERGE UP TO {target}
@@ -714,7 +721,7 @@ export function G2048({
       </div>
 
       {/* Score cards */}
-      <div className="relative mt-3 flex w-[min(92vw,332px)] items-stretch justify-center gap-3">
+      <div className="relative mt-2 flex w-[min(92vw,332px)] shrink-0 items-stretch justify-center gap-3 sm:mt-3">
         <ScoreCard label="SCORE" value={score} color={ACCENT.solid} reducedMotion={reducedMotion} />
         <ScoreCard label="BEST" value={best} color="#00e5ff" reducedMotion={reducedMotion} />
         {gainPulse && !reducedMotion && (
@@ -732,7 +739,7 @@ export function G2048({
 
       {/* Progress toward 2048 */}
       <div
-        className="mt-3 h-1 w-[min(92vw,332px)] overflow-hidden rounded-pill bg-white/[0.06]"
+        className="mt-2 h-1 w-[min(92vw,332px)] shrink-0 overflow-hidden rounded-pill bg-white/[0.06] sm:mt-3"
         role="presentation"
       >
         <div
@@ -746,22 +753,25 @@ export function G2048({
 
       {/* Status message */}
       <div
-        className="mt-3 min-h-[18px] text-center font-mono text-[12.5px]"
+        className="mt-2 min-h-[16px] shrink-0 text-center font-mono text-[11.5px] sm:mt-3 sm:min-h-[18px] sm:text-[12.5px]"
         style={{ color: over ? "#ff9e3d" : ACCENT.soft }}
         aria-hidden
       >
         {statusMsg}
       </div>
 
-      {/* Board */}
+      {/* Board — flexes to the height left between the fixed chrome above and the
+          controls below; sized square by useFitBox so it never forces scroll. */}
+      <div ref={boardFitRef} className="mt-1.5 flex min-h-0 w-full flex-1 items-center justify-center">
       <div
-        className={cn("mt-1.5", over && !reducedMotion && "animate-shake")}
+        className={cn(over && !reducedMotion && "animate-shake")}
         style={{ transform: nudgeTransform, transition: nudge ? "transform 0.08s ease-out" : "transform 0.12s ease-out" }}
       >
         <div
-          className="relative w-[min(92vw,332px)] rounded-[14px]"
+          className="relative rounded-[14px]"
           style={{
-            aspectRatio: "1 / 1",
+            width: boardSize?.w,
+            height: boardSize?.h,
             background: "rgba(155,140,255,0.08)",
             border: "1px solid rgba(155,140,255,0.18)",
             boxShadow: `0 18px 50px -22px ${ACCENT.solid}55, inset 0 0 40px -30px ${ACCENT.solid}`,
@@ -838,11 +848,11 @@ export function G2048({
           })}
         </div>
       </div>
+      </div>
 
       {/* Directional controls */}
       <div
-        className="mt-5 grid gap-2.5"
-        style={{ gridTemplateColumns: "repeat(3, 56px)", gridTemplateRows: "repeat(2, 56px)" }}
+        className="mt-2 grid shrink-0 gap-1.5 [grid-template-columns:repeat(3,46px)] [grid-template-rows:repeat(2,46px)] sm:mt-3 sm:gap-2.5 sm:[grid-template-columns:repeat(3,56px)] sm:[grid-template-rows:repeat(2,56px)]"
         role="group"
         aria-label="Directional controls"
       >
@@ -852,19 +862,19 @@ export function G2048({
         <DirButton dir="R" label="Move right" symbol="→" onMove={doMove} disabled={locked} reducedMotion={reducedMotion} className="col-start-3 row-start-2" />
       </div>
 
-      <p className="mt-3.5 font-mono text-[10.5px]" style={{ color: "rgba(226,234,255,0.4)" }}>
+      <p className="mt-1.5 shrink-0 font-mono text-[9.5px] sm:mt-2.5 sm:text-[10.5px]" style={{ color: "rgba(226,234,255,0.4)" }}>
         Arrow keys, WASD, or swipe
       </p>
 
       {/* Undo + Restart */}
-      <div className="mt-3.5 flex items-center gap-2.5">
+      <div className="mt-1.5 flex shrink-0 items-center gap-2.5 sm:mt-2.5">
         <button
           type="button"
           onClick={undo}
           disabled={!undoAvailable || locked}
           aria-label="Undo last move"
           className={cn(
-            "inline-flex min-h-[44px] items-center gap-1.5 rounded-pill border px-5 py-2 font-display text-[13px] text-[#eaf1ff] disabled:cursor-not-allowed disabled:opacity-40",
+            "inline-flex min-h-[38px] items-center gap-1.5 rounded-pill border px-5 py-1.5 font-display text-[13px] text-[#eaf1ff] disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-[44px] sm:py-2",
             !reducedMotion && "transition-transform active:scale-[0.98]",
           )}
           style={{ borderColor: "rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.04)" }}
@@ -876,7 +886,7 @@ export function G2048({
           onClick={restart}
           aria-label="Restart this puzzle"
           className={cn(
-            "inline-flex min-h-[44px] items-center gap-1.5 rounded-pill border px-5 py-2 font-display text-[13px] text-[#eaf1ff]",
+            "inline-flex min-h-[38px] items-center gap-1.5 rounded-pill border px-5 py-1.5 font-display text-[13px] text-[#eaf1ff] sm:min-h-[44px] sm:py-2",
             !reducedMotion && "transition-transform active:scale-[0.98]",
           )}
           style={{ borderColor: "rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.04)" }}
@@ -890,7 +900,7 @@ export function G2048({
           type="button"
           onClick={() => setShowModal(true)}
           className={cn(
-            "mt-3.5 min-h-[44px] rounded-pill border px-6 py-2.5 font-display text-[13.5px] text-[#eaf1ff]",
+            "mt-1.5 min-h-[38px] shrink-0 rounded-pill border px-6 py-1.5 font-display text-[13.5px] text-[#eaf1ff] sm:mt-2.5 sm:min-h-[44px] sm:py-2.5",
             !reducedMotion && "transition-transform active:scale-[0.98]",
           )}
           style={{ borderColor: "rgba(255,255,255,0.2)", background: "rgba(255,255,255,0.04)" }}
@@ -985,12 +995,12 @@ function ScoreCard({
 
   return (
     <div
-      className="flex flex-1 flex-col items-center justify-center rounded-[14px] px-[18px] py-2.5"
+      className="flex flex-1 flex-col items-center justify-center rounded-[14px] px-[18px] py-1.5 sm:py-2.5"
       style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}
     >
       <div
         className={cn(
-          "font-display text-[26px] font-semibold tabular-nums",
+          "font-display text-[22px] font-semibold leading-none tabular-nums sm:text-[26px]",
           !reducedMotion && "transition-transform duration-150",
           bump && "scale-110",
         )}
@@ -999,7 +1009,7 @@ function ScoreCard({
         {value}
       </div>
       <div
-        className="mt-[5px] font-mono text-[9.5px] tracking-[0.14em]"
+        className="mt-[3px] font-mono text-[9px] tracking-[0.14em] sm:mt-[5px] sm:text-[9.5px]"
         style={{ color: "rgba(226,234,255,0.45)" }}
       >
         {label}
@@ -1032,7 +1042,7 @@ function DirButton({
       disabled={disabled}
       onClick={() => onMove(dir)}
       className={cn(
-        "flex h-[56px] w-[56px] touch-manipulation items-center justify-center rounded-[12px] text-xl text-[#eafcff] disabled:opacity-40",
+        "flex h-[46px] w-[46px] touch-manipulation items-center justify-center rounded-[12px] text-lg text-[#eafcff] disabled:opacity-40 sm:h-[56px] sm:w-[56px] sm:text-xl",
         !reducedMotion && "transition-transform active:scale-90",
         className,
       )}

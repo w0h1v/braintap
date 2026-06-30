@@ -10,6 +10,7 @@ import { formatClock } from "@/lib/share";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useFitBox } from "@/lib/useFitBox";
 import { useEntitlement } from "@/lib/entitlement";
 import { adsAvailable, showRewardedAd } from "@/lib/ads";
 import { getMonetizationConfig } from "@/lib/config";
@@ -123,6 +124,18 @@ export function Forge({
   const adInFlightRef = useRef(false);
 
   const clock = useGameClock(!won && started, saved?.elapsedMs ?? 0);
+
+  // Size the board to the height left between the fixed meta/controls so the
+  // whole game fits a phone viewport without scrolling. The grid is the N×N
+  // cell area plus a clue gutter on each axis. Width budgets one extra track
+  // (N+1). Height budgets a little more (the top column-clue row can stack 2-3
+  // numbers and run taller than one cell), so we use N+1.6 rows to pick a width
+  // whose box leaves vertical headroom for stacked clues.
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(
+    N + 1,
+    N + 1.6,
+    420,
+  );
 
   // Clear any pending error-flash timer on unmount.
   useEffect(
@@ -510,9 +523,9 @@ export function Forge({
   }, [progress, won, puzzle.glyphName]);
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       {/* meta row */}
-      <div className="mb-2 flex w-full max-w-[420px] items-center justify-between font-mono text-[11px] text-ink-mute">
+      <div className="mb-1 flex w-full max-w-[420px] shrink-0 items-center justify-between font-mono text-[11px] text-ink-mute sm:mb-2">
         <span style={{ color: ACCENT.soft }}>NONOGRAM · {N}×{N}</span>
         {/* When the host renders a unified timer, hide our own timer chip but
             keep all timing logic so result.timeMs is still reported. */}
@@ -523,11 +536,12 @@ export function Forge({
         )}
       </div>
 
-      {/* live status line */}
+      {/* live status line — collapses to zero height on mobile until solved so it
+          never steals board space; expands on desktop where there's room. */}
       <div
         className={cn(
-          "mb-2 h-[20px] font-display text-[15px] font-semibold transition-opacity duration-200",
-          won ? "opacity-100" : "opacity-0",
+          "shrink-0 overflow-hidden font-display text-[15px] font-semibold transition-opacity duration-200 sm:mb-2 sm:h-[20px]",
+          won ? "h-[18px] opacity-100 sm:h-[20px]" : "h-0 opacity-0",
         )}
         style={{ color: ACCENT.soft }}
       >
@@ -539,8 +553,19 @@ export function Forge({
         {liveMsg}
       </span>
 
-      {/* board wrapper (for solved vignette + instructions overlay) */}
-      <div className="relative w-full" style={{ maxWidth: 420 }}>
+      {/* board fit region — flexes to the space between fixed meta and controls
+          and centres the board sized by useFitBox so it fits without scroll. */}
+      <div
+        ref={boardFitRef}
+        className="flex min-h-0 w-full flex-1 items-center justify-center"
+      >
+      {/* board wrapper (for solved vignette + instructions overlay). Width is
+          driven by useFitBox; the grid inside is width-driven (aspect-square
+          cells) so its height follows from that width. */}
+      <div
+        className="relative"
+        style={{ width: boardSize?.w ?? "100%", maxWidth: 420 }}
+      >
         <div
           ref={gridRef}
           className={cn("mx-auto select-none rounded-2xl p-2 transition-shadow")}
@@ -550,9 +575,10 @@ export function Forge({
             // narrow widths (≤360px) without overflowing the wrapper.
             gridTemplateColumns: `${N >= 7 ? "clamp(24px, 9vw, 42px)" : "clamp(30px, 12vw, 50px)"} repeat(${N}, minmax(0, 1fr))`,
             gap: N >= 7 ? "clamp(2px, 0.8vw, 4px)" : "clamp(3px, 1vw, 5px)",
-            // Fill the w-full / maxWidth:420 wrapper above. Using 92vw here made
-            // the grid wider than that wrapper, and `mx-auto` then collapsed to 0
-            // and let it overflow the viewport on phones (≤ ~800px wide).
+            // Width-driven: cells are aspect-square so the grid's height follows
+            // from its width. useFitBox picks a width whose (N+1)×(N+1) box fits
+            // the available height, so this width keeps the whole grid (clues +
+            // cells) inside the viewport without scrolling.
             width: "100%",
             touchAction: "manipulation",
             boxShadow: won
@@ -652,10 +678,11 @@ export function Forge({
           </div>
         )}
       </div>
+      </div>
 
       {/* progress bar */}
       <div
-        className="mt-4 h-1.5 w-full max-w-[420px] overflow-hidden rounded-full"
+        className="mt-2 h-1.5 w-full max-w-[420px] shrink-0 overflow-hidden rounded-full sm:mt-4"
         style={{ background: "rgba(255,255,255,.06)" }}
         role="progressbar"
         aria-valuemin={0}
@@ -674,14 +701,14 @@ export function Forge({
       </div>
 
       {/* controls */}
-      <div className="mt-4 flex w-full max-w-[420px] flex-wrap items-center justify-center gap-2.5">
+      <div className="mt-2.5 flex w-full max-w-[420px] shrink-0 flex-wrap items-center justify-center gap-1.5 sm:mt-4 sm:gap-2.5">
         <button
           type="button"
           onClick={() => setMarkMode((m) => !m)}
           aria-pressed={markMode}
           disabled={won}
           className={cn(
-            "min-h-[44px] rounded-pill border px-5 py-2.5 font-display text-[13.5px] transition-all active:scale-95 disabled:opacity-40",
+            "min-h-[40px] rounded-pill border px-3.5 py-2 font-display text-[13px] transition-all active:scale-95 disabled:opacity-40 sm:min-h-[44px] sm:px-5 sm:py-2.5 sm:text-[13.5px]",
             markMode ? "text-[#04060f]" : "border-line-strong text-[#eaf1ff]",
           )}
           style={
@@ -701,7 +728,7 @@ export function Forge({
           onClick={undo}
           disabled={won || history.length === 0}
           aria-label="Undo last move"
-          className="min-h-[44px] min-w-[44px] rounded-pill border border-line-strong px-4 py-2.5 font-display text-[13.5px] text-[#eaf1ff] transition-all active:scale-95 disabled:opacity-30"
+          className="min-h-[40px] min-w-[40px] rounded-pill border border-line-strong px-3.5 py-2 font-display text-[13px] text-[#eaf1ff] transition-all active:scale-95 disabled:opacity-30 sm:min-h-[44px] sm:min-w-[44px] sm:px-4 sm:py-2.5 sm:text-[13.5px]"
           style={{ background: "rgba(255,255,255,0.04)" }}
         >
           ↺ Undo
@@ -712,7 +739,7 @@ export function Forge({
           disabled={won || cells.every((v) => v === 0)}
           aria-label={confirmClear ? "Confirm clear board" : "Clear board"}
           className={cn(
-            "min-h-[44px] min-w-[44px] rounded-pill border px-4 py-2.5 font-display text-[13.5px] transition-all active:scale-95 disabled:opacity-30",
+            "min-h-[40px] min-w-[40px] rounded-pill border px-3.5 py-2 font-display text-[13px] transition-all active:scale-95 disabled:opacity-30 sm:min-h-[44px] sm:min-w-[44px] sm:px-4 sm:py-2.5 sm:text-[13.5px]",
             confirmClear
               ? "border-[rgba(255,90,140,.6)] text-[#ff8fb0]"
               : "border-line-strong text-[#eaf1ff]",
@@ -731,20 +758,23 @@ export function Forge({
           onHint={useHint}
           accent={ACCENT}
           disabled={won}
+          className="min-h-[40px] px-3.5 py-2 text-[13px] sm:min-h-[44px] sm:px-4 sm:py-2.5 sm:text-[13.5px]"
         />
       </div>
 
-      {/* legend */}
+      {/* legend — hidden on mobile (controls are self-explanatory and the
+          instructions overlay covers the rules); shown from sm: up where there's
+          vertical room. The solved CTA stays visible on all sizes. */}
       {won ? (
         <button
           type="button"
           onClick={() => setShowModal(true)}
-          className="mt-3 rounded-pill border border-line-strong bg-white/[0.04] px-5 py-2 font-mono text-[11px] tracking-[0.08em] text-ink-soft transition-transform active:scale-95"
+          className="mt-2.5 shrink-0 rounded-pill border border-line-strong bg-white/[0.04] px-5 py-2 font-mono text-[11px] tracking-[0.08em] text-ink-soft transition-transform active:scale-95 sm:mt-3"
         >
           View your solved {puzzle.glyphName} ↗
         </button>
       ) : (
-        <p className="mt-3 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center font-mono text-[11px] text-ink-faint">
+        <p className="mt-3 hidden shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center font-mono text-[11px] text-ink-faint sm:flex">
           <span>
             <span style={{ color: FILL }}>■</span> tap to fill
           </span>
@@ -895,10 +925,11 @@ function Row({
                     : "none",
               color: MARK,
               animationDelay: burstDelay ? `${burstDelay}ms` : undefined,
-              // Keep glyph cells comfortably tappable on small phones; the 7×7
-              // hard grid needs a lower floor so it still fits at ≤360px wide.
-              minHeight:
-                size >= 7 ? "clamp(36px, 11vw, 48px)" : "clamp(44px, 14vw, 56px)",
+              // Cells are square (aspect-square) and the board is sized to fit by
+              // useFitBox, so width drives the size. Keep only a small minimum so
+              // a fitted cell never falls below a tappable floor; do NOT use a tall
+              // vw-based floor here — that fought the fit and overflowed phones.
+              minHeight: 24,
             }}
           >
             <span

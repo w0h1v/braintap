@@ -10,6 +10,7 @@ import { formatClock } from "@/lib/share";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useFitBox } from "@/lib/useFitBox";
 import { useEntitlement } from "@/lib/entitlement";
 import { adsAvailable, showRewardedAd } from "@/lib/ads";
 import { getMonetizationConfig } from "@/lib/config";
@@ -96,6 +97,12 @@ export function Strands({
   const hintInFlightRef = useRef(false);
 
   const clock = useGameClock(!won, saved?.elapsedMs ?? 0);
+
+  // Size the 6×8 board to the height left between the fixed chrome (eyebrow,
+  // progress, bar, message, controls) so board + controls fit without scroll.
+  // Cap at 320px so the tall 6×8 board never claims more height than needed on
+  // short phones; it still grows to this cap on roomy screens.
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(COLS, ROWS, 320);
 
   // Soft hint nudge: after a stretch of inactivity (no new word, no selection)
   // and with hints still available, gently pulse the Hint button. Resets on
@@ -563,27 +570,31 @@ export function Strands({
           : ACCENT.soft;
 
   return (
-    <div className="flex w-full flex-col items-center" style={{ ["--strands-w" as string]: "min(92vw, 360px)" }}>
-      {/* theme eyebrow */}
-      <div className="mb-1.5 text-center" style={{ width: "var(--strands-w)" }}>
-        <div
-          className="font-mono text-[10.5px] uppercase tracking-[0.18em]"
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center" style={{ ["--strands-w" as string]: "min(92vw, 320px)" }}>
+      {/* theme eyebrow — on phones the theme + hint-budget sit on one line to
+          save a full text row; they stack again from sm: up. */}
+      <div
+        className="mb-1 flex shrink-0 flex-wrap items-baseline justify-center gap-x-2 text-center sm:mb-1.5 sm:block"
+        style={{ width: "var(--strands-w)" }}
+      >
+        <span
+          className="font-mono text-[10.5px] uppercase tracking-[0.18em] sm:block"
           style={{ color: ACCENT.soft }}
         >
           Theme · {puzzle.theme}
-        </div>
+        </span>
         {/* Be explicit that the tier difference here is hint generosity — the
             grid/words are the same — so the choice isn't misleading (MECH). */}
-        <div className="mt-0.5 font-mono text-[9.5px] tracking-[0.08em] text-ink-faint">
+        <span className="font-mono text-[9.5px] tracking-[0.08em] text-ink-faint sm:mt-0.5 sm:block">
           {maxHints === 0
             ? "No hints on this tier"
             : `${maxHints} hint${maxHints === 1 ? "" : "s"} available`}
-        </div>
+        </span>
       </div>
 
       {/* progress + timer row */}
       <div
-        className="mb-2 flex items-center justify-between font-mono text-[12px]"
+        className="mb-1.5 flex shrink-0 items-center justify-between font-mono text-[11px] sm:mb-2 sm:text-[12px]"
         style={{ width: "var(--strands-w)" }}
       >
         <span style={{ color: ACCENT.soft }}>
@@ -599,7 +610,7 @@ export function Strands({
 
       {/* progress bar */}
       <div
-        className="mb-3 h-1.5 overflow-hidden rounded-pill"
+        className="mb-2 h-1.5 shrink-0 overflow-hidden rounded-pill sm:mb-3"
         style={{ width: "var(--strands-w)", background: "rgba(255,255,255,0.07)" }}
         role="progressbar"
         aria-valuemin={0}
@@ -617,6 +628,10 @@ export function Strands({
         />
       </div>
 
+      {/* board region — flexes to the height left between the fixed chrome and
+          controls; the board is sized by aspect ratio so it fits both width and
+          height (no page scroll on phones). */}
+      <div ref={boardFitRef} className="flex min-h-0 w-full flex-1 items-center justify-center">
       {/* grid + connector overlay */}
       <div
         className={cn(
@@ -624,7 +639,7 @@ export function Strands({
           shake && !reducedMotion && "animate-shake",
           boardWin && !reducedMotion && "animate-solve",
         )}
-        style={{ width: "var(--strands-w)" }}
+        style={{ width: boardSize?.w, height: boardSize?.h }}
       >
         {/* SVG connector lines behind the cells */}
         <svg
@@ -669,8 +684,11 @@ export function Strands({
 
         <div
           ref={boardRef}
-          className="relative grid touch-none gap-1.5"
-          style={{ gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))` }}
+          className="relative grid h-full w-full touch-none gap-1 sm:gap-1.5"
+          style={{
+            gridTemplateColumns: `repeat(${COLS}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${ROWS}, minmax(0, 1fr))`,
+          }}
           role="grid"
           aria-label={`${COLS} by ${ROWS} letter grid. Tap connected letters or drag across them to spell theme words.`}
         >
@@ -725,7 +743,7 @@ export function Strands({
                 onPointerDown={(e) => onCellPointerDown(e, r, c)}
                 onClick={() => activate(r, c)}
                 className={cn(
-                  "relative z-[1] flex aspect-square select-none items-center justify-center rounded-[10px] font-display font-semibold outline-none transition-[background,box-shadow,transform,border-color] duration-150",
+                  "relative z-[1] flex h-full w-full select-none items-center justify-center rounded-[10px] font-display font-semibold outline-none transition-[background,box-shadow,transform,border-color] duration-150",
                   !reducedMotion && "active:scale-90",
                   isPopping && "animate-pop",
                   isHinted && !reducedMotion && "animate-pulse",
@@ -738,7 +756,6 @@ export function Strands({
                   boxShadow: shadow,
                   border,
                   fontSize: "clamp(15px, 4.4vw, 22px)",
-                  minHeight: 44,
                 }}
               >
                 {letter}
@@ -759,11 +776,12 @@ export function Strands({
           })}
         </div>
       </div>
+      </div>
 
       {/* live feedback message */}
       <div
         className={cn(
-          "mt-3 flex min-h-[20px] items-center justify-center text-center font-mono text-[12px]",
+          "mt-1.5 flex min-h-[16px] shrink-0 items-center justify-center text-center font-mono text-[11px] sm:mt-3 sm:min-h-[20px] sm:text-[12px]",
           !reducedMotion && "transition-colors duration-200",
         )}
         style={{ width: "var(--strands-w)", color: msgColor }}
@@ -778,7 +796,7 @@ export function Strands({
 
       {/* controls */}
       <div
-        className="mt-3 flex items-center justify-center gap-3"
+        className="mt-1.5 flex shrink-0 items-center justify-center gap-2 sm:mt-3 sm:gap-3"
         style={{ width: "var(--strands-w)" }}
       >
         {won ? (
@@ -788,13 +806,12 @@ export function Strands({
             type="button"
             onClick={() => setShowModal(true)}
             className={cn(
-              "w-full rounded-pill px-7 py-2.5 font-display text-[13.5px] font-semibold text-[#04060f] outline-none transition-transform",
+              "h-10 w-full rounded-pill px-7 font-display text-[13.5px] font-semibold text-[#04060f] outline-none transition-transform sm:h-11",
               !reducedMotion && "active:scale-95",
               "focus-visible:ring-2 focus-visible:ring-white/80",
             )}
             style={{
               backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`,
-              minHeight: 44,
             }}
           >
             View results
@@ -806,11 +823,11 @@ export function Strands({
           onClick={clear}
           disabled={path.length === 0 || won}
           className={cn(
-            "rounded-pill border border-line-strong px-5 py-2.5 font-display text-[13.5px] text-[#eaf1ff] outline-none transition-[opacity,transform,background] disabled:opacity-40",
+            "h-10 rounded-pill border border-line-strong px-5 font-display text-[13.5px] text-[#eaf1ff] outline-none transition-[opacity,transform,background] disabled:opacity-40 sm:h-11",
             !reducedMotion && "active:scale-95",
             "focus-visible:ring-2 focus-visible:ring-white/50",
           )}
-          style={{ background: "rgba(255,255,255,0.04)", minHeight: 44 }}
+          style={{ background: "rgba(255,255,255,0.04)" }}
         >
           Clear
         </button>
@@ -838,14 +855,13 @@ export function Strands({
           onClick={submit}
           disabled={!validPath || won}
           className={cn(
-            "rounded-pill px-7 py-2.5 font-display text-[13.5px] font-semibold text-[#04060f] outline-none transition-[opacity,transform,box-shadow] disabled:opacity-40",
+            "h-10 rounded-pill px-7 font-display text-[13.5px] font-semibold text-[#04060f] outline-none transition-[opacity,transform,box-shadow] disabled:opacity-40 sm:h-11",
             !reducedMotion && "active:scale-95",
             "focus-visible:ring-2 focus-visible:ring-white/80",
           )}
           style={{
             backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})`,
             boxShadow: validPath && !won ? `0 6px 22px ${ACCENT.solid}3a` : "none",
-            minHeight: 44,
           }}
         >
           Submit

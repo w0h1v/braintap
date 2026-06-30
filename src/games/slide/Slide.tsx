@@ -10,6 +10,7 @@ import { formatClock } from "@/lib/share";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useFitBox } from "@/lib/useFitBox";
 import { useEntitlement } from "@/lib/entitlement";
 import { adsAvailable, showRewardedAd } from "@/lib/ads";
 import { getMonetizationConfig } from "@/lib/config";
@@ -69,6 +70,11 @@ export function Slide({
   const size = puzzle.size ?? sizeOf(puzzle.start);
   const cells = cellsFor(size);
   const lastTile = cells - 1; // highest tile value (== cells - 1)
+
+  // Size the square board to the height left between the fixed chrome and the
+  // controls, so board + controls fit a phone viewport without scrolling. The
+  // board is size×size; cap at the prior desktop max (360px).
+  const { ref: fitRef, size: boardSize } = useFitBox<HTMLDivElement>(size, size, 360);
 
   // Only honour a saved board that matches the active grid size. Older saves (or
   // saves from a different tier) carry a board of a different length, so we fall
@@ -440,7 +446,7 @@ export function Slide({
   const hintsLeft = MAX_HINTS - hintsUsed;
 
   return (
-    <div className="flex w-full flex-col items-center" id="screen-slide">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center" id="screen-slide">
       <span className="sr-only" role="status" aria-live="polite">
         {status}
       </span>
@@ -448,7 +454,7 @@ export function Slide({
       {/* meta row: moves + progress + timer (timer hidden when the host owns it) */}
       <div
         className={cn(
-          "flex w-full items-center justify-between font-mono text-[11px] text-ink-mute",
+          "flex w-full shrink-0 items-center justify-between font-mono text-[11px] text-ink-mute",
           !reducedMotion && "animate-rise",
         )}
         style={{ maxWidth: BOARD_W }}
@@ -484,7 +490,7 @@ export function Slide({
 
       {/* progress bar */}
       <div
-        className="mt-2.5 h-1 w-full overflow-hidden rounded-pill bg-white/[0.06]"
+        className="mt-2.5 h-1 w-full shrink-0 overflow-hidden rounded-pill bg-white/[0.06]"
         style={{ maxWidth: BOARD_W }}
         role="presentation"
       >
@@ -500,7 +506,7 @@ export function Slide({
       {/* live targets: move-par (Manhattan lower bound) + personal best, giving
           each session a self-competition goal beyond "eventually finish". */}
       <div
-        className="mt-2 flex w-full items-center justify-center gap-3 font-mono text-[10.5px] tracking-[0.1em] text-ink-faint"
+        className="mt-2 flex w-full shrink-0 items-center justify-center gap-3 font-mono text-[10.5px] tracking-[0.1em] text-ink-faint"
         style={{ maxWidth: BOARD_W }}
       >
         <span aria-label={`Par ${optimalLB} moves (fewest possible)`}>
@@ -518,12 +524,15 @@ export function Slide({
       <div
         id="slide-msg"
         aria-hidden
-        className="mb-1 mt-2 min-h-[18px] text-center font-mono text-[12.5px]"
+        className="mb-1 mt-2 min-h-[18px] shrink-0 text-center font-mono text-[12.5px]"
         style={{ color: ACCENT.soft }}
       >
         {isComplete ? "Solved!" : replayed ? "Replaying — beat your time." : ""}
       </div>
 
+      {/* board fit region — flexes to the height left between the fixed chrome
+          above and the controls below; the square board is sized to fit. */}
+      <div ref={fitRef} className="flex min-h-0 w-full flex-1 items-center justify-center">
       <div
         id="slide-board"
         ref={boardRef}
@@ -532,11 +541,12 @@ export function Slide({
         tabIndex={isComplete ? -1 : 0}
         onKeyDown={onBoardKeyDown}
         className={cn(
-          "relative w-full rounded-2xl p-2 outline-none focus-visible:ring-2",
+          "relative rounded-2xl p-2 outline-none focus-visible:ring-2",
           nudge && !reducedMotion && "animate-shake",
         )}
         style={{
-          maxWidth: BOARD_W,
+          width: boardSize?.w,
+          height: boardSize?.h,
           aspectRatio: "1 / 1",
           background: `${ACCENT.solid}14`,
           border: `1px solid ${ACCENT.solid}${isComplete ? "59" : "29"}`,
@@ -659,10 +669,11 @@ export function Slide({
           })}
         </div>
       </div>
+      </div>
 
       {/* controls: undo / reset / hint */}
       <div
-        className="mt-3 flex w-full items-center justify-center gap-2"
+        className="mt-3 flex w-full shrink-0 items-center justify-center gap-2"
         style={{ maxWidth: BOARD_W }}
       >
         <button
@@ -708,7 +719,7 @@ export function Slide({
       {/* Play again after a solve: replay the same board to beat your time/moves. */}
       {isComplete && (
         <div
-          className="mt-2.5 flex w-full items-center justify-center"
+          className="mt-2.5 flex w-full shrink-0 items-center justify-center"
           style={{ maxWidth: BOARD_W }}
         >
           <button
@@ -728,7 +739,7 @@ export function Slide({
       )}
 
       <p
-        className="mt-3 text-center font-mono text-[11px] leading-relaxed text-ink-faint"
+        className="mt-3 shrink-0 text-center font-mono text-[11px] leading-relaxed text-ink-faint"
         style={{ maxWidth: BOARD_W }}
       >
         Tap a tile next to the gap to slide it. Order 1 → {lastTile} with the gap last. Arrow keys
