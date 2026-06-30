@@ -374,9 +374,9 @@ export function MathSprint({
   ];
 
   return (
-    <div className="flex w-full flex-col items-center bt-safe-bottom">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center bt-safe-bottom">
       {/* stats row */}
-      <div className="grid w-full max-w-[420px] grid-cols-3 gap-2.5">
+      <div className="grid w-full max-w-[420px] shrink-0 grid-cols-3 gap-2.5">
         <StatCard
           value={String(score)}
           label="CORRECT"
@@ -406,14 +406,15 @@ export function MathSprint({
         {liveStatus}
       </p>
 
-      {/* problem + answer card */}
+      {/* problem + answer card — flexes to absorb the height left between the
+          fixed stats row and the keypad, so the whole game fits the viewport. */}
       <div
         className={cn(
-          "relative mt-5 flex w-full max-w-[420px] flex-col items-center justify-center rounded-2xl border px-4 py-7",
+          "relative mt-3 flex min-h-0 w-full max-w-[420px] flex-1 flex-col items-center justify-center rounded-2xl border px-4 py-4 sm:mt-5 sm:py-7",
           shake && !reducedMotion && "animate-shake",
         )}
         style={{
-          minHeight: 150,
+          minHeight: 120,
           background: flash
             ? `linear-gradient(180deg, ${ACCENT.solid}33, rgba(8,12,26,0.4))`
             : `${ACCENT.solid}14`,
@@ -467,7 +468,7 @@ export function MathSprint({
       {!showStart && (
         <>
           <div
-            className="mt-5 grid w-full max-w-[420px] grid-cols-3 gap-2.5"
+            className="mt-3 grid w-full max-w-[420px] shrink-0 grid-cols-3 gap-2.5 sm:mt-5"
             role="group"
             aria-label="Number pad"
           >
@@ -501,7 +502,7 @@ export function MathSprint({
             })}
           </div>
 
-          <div className="mt-2.5 flex w-full max-w-[420px] gap-2.5">
+          <div className="mt-2.5 flex w-full max-w-[420px] shrink-0 gap-2.5">
             <button
               type="button"
               onClick={skip}
@@ -542,7 +543,7 @@ export function MathSprint({
       {showStart && (
         <div
           className={cn(
-            "mt-6 flex w-full max-w-[420px] flex-col items-center",
+            "mt-4 flex w-full max-w-[420px] shrink-0 flex-col items-center sm:mt-6",
             !reducedMotion && "animate-rise",
           )}
         >

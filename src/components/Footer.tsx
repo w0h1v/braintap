@@ -1,7 +1,15 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Logo } from "./GameIcon";
 
 export function Footer() {
+  // The game screen is a focused, viewport-fit view — no footer (it would add
+  // dead scroll below the board and push the play area on phones).
+  const pathname = usePathname();
+  if (pathname?.startsWith("/play/")) return null;
+
   return (
     <footer className="relative z-[2] mt-16 border-t border-white/[0.06] px-6 pb-10 pt-12">
       <div className="mx-auto flex max-w-shell flex-col items-center justify-between gap-6 sm:flex-row">

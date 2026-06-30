@@ -14,6 +14,7 @@ import { cn } from "@/lib/cn";
 import { useEntitlement } from "@/lib/entitlement";
 import { adsAvailable, showRewardedAd } from "@/lib/ads";
 import { getMonetizationConfig } from "@/lib/config";
+import { useFitBox } from "@/lib/useFitBox";
 import {
   faces,
   buildAdjacency,
@@ -235,6 +236,10 @@ export function Pips({
   }, [puzzle.cells]);
   const rows = useMemo(() => Math.max(...puzzle.cells.map((c) => c.r)) + 1, [puzzle.cells]);
   const cols = useMemo(() => Math.max(...puzzle.cells.map((c) => c.c)) + 1, [puzzle.cells]);
+  // Size the square-celled board to the height left between the fixed chrome
+  // (heading, toolbar, tray, controls) so board + controls fit without scroll.
+  // maxW caps the board at its desktop cell size (82px/cell) so it never bloats.
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(cols, rows, cols * 82);
   const tintIdx = useMemo(() => colourRegions(puzzle, adj), [puzzle, adj]);
   // Badge anchor cell per region: the bottom-right-most cell (max r, then max c).
   const regionAnchor = useMemo(() => {
@@ -654,9 +659,9 @@ export function Pips({
   const selFaces = selDomino ? faces(selDomino, pendingFlip) : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-[440px] flex-col items-center px-1">
+    <div className="mx-auto flex min-h-0 w-full max-w-[440px] flex-1 flex-col items-center px-1">
       {!hostTimer && (
-        <div className="mb-3 flex w-full items-center justify-end font-mono text-[11px] text-ink-mute">
+        <div className="mb-3 flex w-full shrink-0 items-center justify-end font-mono text-[11px] text-ink-mute">
           <span
             className="font-semibold tabular-nums tracking-[0.06em] text-ink-soft"
             aria-label={`Time elapsed ${formatClock(clock.ms)}`}
@@ -667,7 +672,7 @@ export function Pips({
       )}
 
       {/* Heading row */}
-      <div className="mb-1 flex w-full items-center justify-between">
+      <div className="mb-1 flex w-full shrink-0 items-center justify-between">
         <span className="font-mono text-[10px] tracking-[0.16em] text-ink-faint">
           FILL EVERY REGION
         </span>
@@ -679,7 +684,7 @@ export function Pips({
       {/* Live star goal — a soft target so a fast solve feels earned. */}
       {!won && (
         <div
-          className="mb-2 flex w-full items-center justify-between font-mono text-[10px] tracking-[0.08em] text-ink-mute"
+          className="mb-2 flex w-full shrink-0 items-center justify-between font-mono text-[10px] tracking-[0.08em] text-ink-mute"
           aria-hidden
         >
           <span className="tabular-nums" style={{ color: liveStars === 3 ? MET : undefined }}>
@@ -695,13 +700,17 @@ export function Pips({
         </div>
       )}
 
-      {/* Board */}
+      {/* Board — flexes to the height left between the fixed heading and the
+          toolbar/tray/controls; sized by aspect ratio so the whole game fits the
+          viewport without scrolling. */}
+      <div ref={boardFitRef} className="flex min-h-0 w-full flex-1 items-center justify-center">
       <div
         className="grid"
         style={{
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
           gridTemplateRows: `repeat(${rows}, 1fr)`,
-          width: `min(100%, ${cols * 82}px)`,
+          width: boardSize?.w,
+          height: boardSize?.h,
           gap: 0,
         }}
         role="grid"
@@ -813,11 +822,12 @@ export function Pips({
           );
         })}
       </div>
+      </div>
 
       {/* Won-board review affordance: the board is locked, so offer the next
           actions inline (not only buried in the modal). */}
       {won && (
-        <div className="mt-4 flex w-full items-center justify-center gap-2.5">
+        <div className="mt-4 flex w-full shrink-0 items-center justify-center gap-2.5">
           <button
             type="button"
             onClick={replayPuzzle}
@@ -838,7 +848,7 @@ export function Pips({
       )}
 
       {/* Selected-domino toolbar */}
-      <div className="mt-4 flex min-h-[44px] w-full items-center justify-center">
+      <div className="mt-4 flex min-h-[44px] w-full shrink-0 items-center justify-center">
         {selFaces ? (
           <div
             className="flex items-center gap-2 rounded-pill border px-2.5 py-1.5"
@@ -900,7 +910,7 @@ export function Pips({
 
       {/* Tray */}
       <div
-        className="mt-3 flex min-h-[74px] w-full flex-wrap items-center justify-center gap-3 rounded-2xl border px-3 py-3"
+        className="mt-3 flex min-h-[74px] w-full shrink-0 flex-wrap items-center justify-center gap-3 rounded-2xl border px-3 py-3"
         style={{ borderColor: "rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.02)" }}
       >
         {allPlaced ? (
@@ -944,7 +954,7 @@ export function Pips({
       </div>
 
       {/* Undo / redo */}
-      <div className="mt-4 flex w-full items-center justify-center gap-2.5">
+      <div className="mt-4 flex w-full shrink-0 items-center justify-center gap-2.5">
         <button
           type="button"
           onClick={undo}
@@ -976,7 +986,7 @@ export function Pips({
       </div>
 
       {/* Controls: hint + reset */}
-      <div className="mt-3 flex w-full items-center justify-center gap-2.5">
+      <div className="mt-3 flex w-full shrink-0 items-center justify-center gap-2.5">
         <HintButton
           used={hintsUsed}
           max={MAX_HINTS}
@@ -997,7 +1007,7 @@ export function Pips({
 
       <p
         aria-live="polite"
-        className="mt-3 min-h-[2.5rem] text-center font-mono text-[12.5px] leading-snug transition-colors"
+        className="mt-3 min-h-[2.5rem] shrink-0 text-center font-mono text-[12.5px] leading-snug transition-colors"
         style={{ color: won ? MET : ACCENT.soft }}
       >
         {status}

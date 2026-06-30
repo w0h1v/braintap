@@ -27,6 +27,13 @@ interface HiveProps {
   reducedMotion?: boolean;
   disabled?: boolean;
   onTap: (letter: string) => void;
+  /**
+   * Explicit hive width in px. When provided (from a fit-to-height measurement),
+   * it overrides the default responsive `min(82vw, 296px)` so the hive scales to
+   * fit the available vertical space on small phones. Height follows the fixed
+   * 260/280 aspect ratio.
+   */
+  width?: number;
 }
 
 /**
@@ -41,12 +48,13 @@ export function Hive({
   reducedMotion,
   disabled,
   onTap,
+  width,
 }: HiveProps) {
   return (
     <div
       className="relative"
       style={{
-        width: "min(82vw, 296px)",
+        width: width != null ? width : "min(82vw, 296px)",
         aspectRatio: "260 / 280",
         transition: reducedMotion ? "none" : "transform 0.32s cubic-bezier(.2,.7,.2,1)",
         transform: spinning && !reducedMotion ? "rotate(360deg)" : "rotate(0deg)",

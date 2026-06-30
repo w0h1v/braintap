@@ -6,6 +6,7 @@ import { GAME_METAS } from "@/games/_meta";
 import { CompletionModal } from "@/components/play/CompletionModal";
 import { HintButton } from "@/components/play/HintButton";
 import { useGameClock } from "@/lib/useGameClock";
+import { useFitBox } from "@/lib/useFitBox";
 import { formatClock } from "@/lib/share";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
@@ -199,6 +200,10 @@ export function PatternMatrix({
 
   const clock = useGameClock(!done, saved?.elapsedMs ?? 0);
   const strikesLeft = puzzle.strikes - strikesUsed;
+
+  // Size the square 3x3 board to the height left between the fixed meta row and
+  // the prompt/options/controls below, so the whole game fits without scroll.
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(1, 1, 320);
 
   // Resuming a finished puzzle should re-surface the celebratory/result modal
   // (MOB: persisted done state otherwise loses the share + recap entirely).
@@ -415,11 +420,15 @@ export function PatternMatrix({
       : "Out of strikes."
     : `Strikes left: ${strikesLeft}. Pick the tile that completes the matrix.`;
 
-  const tileSize = "min(26vw, 96px)";
+  // Derive the in-cell glyph size from the fitted board (3 cells, 6px gaps,
+  // 6px padding each side). Falls back to the viewport-based size pre-measure.
+  const tileSize = boardSize
+    ? `${Math.max(0, (boardSize.w - 12 - 12) / 3)}px`
+    : "min(26vw, 96px)";
   const optSize = puzzle.optionCount <= 4 ? "min(18vw, 68px)" : "min(15vw, 60px)";
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       <p className="sr-only" role="status" aria-live="polite">
         {status}
       </p>
@@ -431,7 +440,7 @@ export function PatternMatrix({
       {/* meta row: tier + strike pips + timer */}
       <div
         className={cn(
-          "mb-3 flex w-full items-center justify-between font-mono text-[11px] text-ink-mute",
+          "mb-3 flex w-full shrink-0 items-center justify-between font-mono text-[11px] text-ink-mute",
           !reducedMotion && "animate-rise",
         )}
         style={{ maxWidth: "min(92vw, 380px)" }}
@@ -470,10 +479,15 @@ export function PatternMatrix({
         )}
       </div>
 
+      {/* board region — flexes to the height left between the fixed meta row and
+          the prompt/options/controls, so the 3x3 board sizes to fit (no scroll). */}
+      <div ref={boardFitRef} className="flex min-h-0 w-full flex-1 items-center justify-center">
       {/* 3x3 board */}
       <div
-        className="grid aspect-square w-full grid-cols-3 gap-1.5 rounded-2xl border-2 p-1.5"
+        className="grid aspect-square grid-cols-3 gap-1.5 rounded-2xl border-2 p-1.5"
         style={{
+          width: boardSize?.w,
+          height: boardSize?.h,
           maxWidth: "min(92vw, 320px)",
           borderColor: `${ACCENT.solid}66`,
           background: `${ACCENT.solid}14`,
@@ -533,11 +547,12 @@ export function PatternMatrix({
           );
         })}
       </div>
+      </div>
 
       {/* hint tray (revealed rules) */}
       {revealedRules.length > 0 && (
         <div
-          className="mt-3 w-full rounded-xl border p-3 text-left"
+          className="mt-3 w-full shrink-0 rounded-xl border p-3 text-left"
           style={{ maxWidth: "min(92vw, 380px)", background: `${ACCENT.solid}10`, borderColor: `${ACCENT.solid}33` }}
         >
           <div className="font-mono text-[10px] tracking-[0.16em]" style={{ color: ACCENT.soft }}>
@@ -552,7 +567,7 @@ export function PatternMatrix({
       )}
 
       {/* prompt */}
-      <p className="mt-4 text-center font-display text-[13.5px] text-ink-soft" style={{ maxWidth: "min(92vw, 380px)" }}>
+      <p className="mt-4 shrink-0 text-center font-display text-[13.5px] text-ink-soft" style={{ maxWidth: "min(92vw, 380px)" }}>
         {done
           ? won
             ? "Solved — nicely reasoned."
@@ -562,7 +577,7 @@ export function PatternMatrix({
 
       {/* options strip */}
       <div
-        className="mt-3 grid w-full justify-items-center gap-2"
+        className="mt-3 grid w-full shrink-0 justify-items-center gap-2"
         style={{
           maxWidth: "min(92vw, 380px)",
           gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
@@ -625,7 +640,7 @@ export function PatternMatrix({
       {/* controls: during play → confirm + hint; after → replay + view result
           so the player can recover even after dismissing the modal. */}
       <div
-        className="mt-4 flex w-full items-center justify-center gap-3"
+        className="mt-4 flex w-full shrink-0 items-center justify-center gap-3"
         style={{ maxWidth: "min(92vw, 380px)" }}
       >
         {done ? (

@@ -9,6 +9,7 @@ import { HintButton } from "@/components/play/HintButton";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useFitBox } from "@/lib/useFitBox";
 import { useEntitlement } from "@/lib/entitlement";
 import { adsAvailable, showRewardedAd } from "@/lib/ads";
 import { getMonetizationConfig } from "@/lib/config";
@@ -156,6 +157,19 @@ export function Connections({
 
   /** Number of columns in the tile grid (matches grid-cols-4). */
   const GRID_COLS = 4;
+
+  /**
+   * Size the tile grid to the height left between the fixed header/controls so
+   * board + controls fit the viewport without page scroll. Tiles are 1.3:1
+   * (w:h), so the box's column-aspect is 4×1.3 = 5.2 wide per `rows` tall; the
+   * row count tracks the (shrinking) tile count as groups are solved/revealed.
+   */
+  const gridRows = Math.max(1, Math.ceil(remaining.length / GRID_COLS));
+  const { ref: gridFitRef, size: gridSize } = useFitBox<HTMLDivElement>(
+    GRID_COLS * 1.3,
+    gridRows,
+    420,
+  );
 
   const maxMistakes = maxMistakesFor(puzzle);
   /** Show near-miss "one away" feedback only when the tier allows it. */
@@ -609,9 +623,9 @@ export function Connections({
   const messageColor = messageTone === "error" ? "#ff9bbf" : ACCENT.soft;
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       <p
-        className="mb-1.5 text-center font-mono text-[10.5px] tracking-[0.16em]"
+        className="mb-1.5 shrink-0 text-center font-mono text-[10.5px] tracking-[0.16em]"
         style={{ color: ACCENT.soft }}
       >
         CREATE FOUR GROUPS OF FOUR
@@ -619,7 +633,7 @@ export function Connections({
 
       {/* message / status area (live region) */}
       <div
-        className="flex min-h-[24px] items-center justify-center px-2 text-center font-mono text-[12.5px] tracking-[0.03em]"
+        className="flex min-h-[24px] shrink-0 items-center justify-center px-2 text-center font-mono text-[12.5px] tracking-[0.03em]"
         style={{ color: messageColor }}
         aria-live="polite"
         role="status"
@@ -636,10 +650,13 @@ export function Connections({
                 : "")}
       </div>
 
-      <div className="w-full" style={{ maxWidth: "min(94vw, 420px)" }}>
+      <div
+        className="flex min-h-0 w-full flex-1 flex-col"
+        style={{ maxWidth: "min(94vw, 420px)" }}
+      >
         {/* solved categories */}
         {solvedOrder.length > 0 && (
-          <div className="mb-2 flex flex-col gap-2">
+          <div className="mb-2 flex shrink-0 flex-col gap-2">
             {solvedOrder.map((gi, order) => {
               const g = puzzle.groups[gi];
               const isFresh = gi === justSolved && !reducedMotion;
@@ -719,13 +736,24 @@ export function Connections({
           </div>
         )}
 
-        {/* grid */}
+        {/* grid — flexes to the height left between the fixed header and the
+            controls, sized by aspect ratio so board + controls fit the viewport
+            (no scroll). The box shrinks row-wise as groups are solved. */}
+        <div
+          ref={gridFitRef}
+          className="flex min-h-0 w-full flex-1 items-center justify-center"
+        >
         {remaining.length > 0 && (
           <div
             className="grid grid-cols-4 gap-1.5 sm:gap-2"
             role="grid"
             aria-label="Connections tiles. Use arrow keys to move, Space to select, Enter to submit four."
             onKeyDown={onGridKeyDown}
+            style={{
+              width: gridSize?.w,
+              height: gridSize?.h,
+              gridTemplateRows: `repeat(${gridRows}, 1fr)`,
+            }}
           >
             {remaining.map((word, i) => {
               const isSel = selected.includes(word);
@@ -752,14 +780,13 @@ export function Connections({
                   }}
                   onFocus={() => setFocusIndex(i)}
                   className={cn(
-                    "group relative flex min-h-[52px] items-center justify-center overflow-hidden rounded-[11px] p-1 text-center font-display font-semibold uppercase leading-[1.08] transition-[transform,box-shadow,background-color,color] duration-150 active:scale-[0.94] outline-none disabled:cursor-default",
+                    "group relative flex h-full min-h-0 w-full items-center justify-center overflow-hidden rounded-[11px] p-1 text-center font-display font-semibold uppercase leading-[1.08] transition-[transform,box-shadow,background-color,color] duration-150 active:scale-[0.94] outline-none disabled:cursor-default",
                     // Visible keyboard focus ring (only shows on keyboard focus).
                     "focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-offset-0",
                     isShaking && !reducedMotion && "animate-shake",
                     !reducedMotion && "motion-safe:animate-pop",
                   )}
                   style={{
-                    aspectRatio: "1.3 / 1",
                     letterSpacing: "0.01em",
                     fontSize: fontSizeFor(word),
                     overflowWrap: "anywhere",
@@ -785,11 +812,12 @@ export function Connections({
             })}
           </div>
         )}
+        </div>
 
         {/* last-guess warning: surface the stakes before the final allowed miss */}
         {lastGuess && (
           <div
-            className="mt-4 flex items-center justify-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em]"
+            className="mt-3 flex shrink-0 items-center justify-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em]"
             style={{ color: "#ff9bbf" }}
             role="status"
           >
@@ -800,7 +828,7 @@ export function Connections({
 
         {/* mistakes tracker */}
         {!won && (
-          <div className={cn("flex items-center justify-center gap-2.5", lastGuess ? "mt-2" : "mt-4")}>
+          <div className={cn("flex shrink-0 items-center justify-center gap-2.5", lastGuess ? "mt-2" : "mt-3")}>
             <span
               className="font-mono text-[11.5px]"
               style={{ color: "rgba(226,234,255,0.55)" }}
@@ -835,7 +863,7 @@ export function Connections({
         {/* actions */}
         {!gameOver && (
           <>
-          <div className="mt-5 flex flex-wrap items-center justify-center gap-2.5">
+          <div className="mt-3 flex shrink-0 flex-wrap items-center justify-center gap-2.5">
             <button
               type="button"
               onClick={shuffle}
@@ -900,7 +928,7 @@ export function Connections({
           </div>
 
           {/* Give up: an explicit, two-step exit so a stuck player is never trapped. */}
-          <div className="mt-3 flex justify-center">
+          <div className="mt-2 flex shrink-0 justify-center">
             {confirmGiveUp ? (
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[11px] tracking-[0.06em]" style={{ color: "rgba(226,234,255,0.6)" }}>
@@ -942,7 +970,7 @@ export function Connections({
           <button
             type="button"
             onClick={() => setShowModal(true)}
-            className="mt-5 min-h-[44px] w-full rounded-pill border px-5 py-2.5 font-display text-sm font-semibold transition-transform duration-150 active:scale-[0.98]"
+            className="mt-4 min-h-[44px] w-full shrink-0 rounded-pill border px-5 py-2.5 font-display text-sm font-semibold transition-transform duration-150 active:scale-[0.98]"
             style={{
               color: ACCENT.solid,
               borderColor: `${ACCENT.solid}55`,

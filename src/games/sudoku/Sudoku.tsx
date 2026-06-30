@@ -10,6 +10,7 @@ import { formatClock } from "@/lib/share";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { cn } from "@/lib/cn";
+import { useFitBox } from "@/lib/useFitBox";
 import { useEntitlement } from "@/lib/entitlement";
 import { adsAvailable, showRewardedAd } from "@/lib/ads";
 import { getMonetizationConfig } from "@/lib/config";
@@ -133,6 +134,12 @@ export function Sudoku({
   const [redoStack, setRedoStack] = useState<Snapshot[]>([]);
 
   const clock = useGameClock(!won, saved?.elapsedMs ?? 0);
+
+  // Size the square 6×6 board to the height left between the fixed meta/progress
+  // chrome and the numpad/controls, so board + all controls fit the viewport
+  // without scrolling on phones. 380 keeps the desktop max in step with the
+  // prior max-w-[min(92vw,380px)].
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(N, N, 380);
 
   // Capture the current mutable board into a serialisable snapshot.
   const snapshot = useCallback(
@@ -522,7 +529,7 @@ export function Sudoku({
           : `${filledCount} of ${CELLS} cells filled.`;
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       <p id="bt-sudoku-status" className="sr-only" role="status" aria-live="polite">
         {status}
       </p>
@@ -530,7 +537,7 @@ export function Sudoku({
       {/* meta row: difficulty + progress + timer */}
       <div
         className={cn(
-          "mb-3 flex w-full items-center justify-between font-mono text-[11px] text-ink-mute",
+          "mb-3 flex w-full shrink-0 items-center justify-between font-mono text-[11px] text-ink-mute",
           !reducedMotion && "animate-rise",
         )}
         style={{ maxWidth: "min(92vw, 380px)" }}
@@ -560,7 +567,7 @@ export function Sudoku({
 
       {/* progress bar */}
       <div
-        className="mb-3 h-1 w-full overflow-hidden rounded-pill bg-white/[0.06]"
+        className="mb-3 h-1 w-full shrink-0 overflow-hidden rounded-pill bg-white/[0.06]"
         style={{ maxWidth: "min(92vw, 380px)" }}
         role="presentation"
       >
@@ -577,7 +584,7 @@ export function Sudoku({
           next edit), so the state isn't conveyed by a single 500ms shake. */}
       {wrongCells.size > 0 && !won && (
         <div
-          className="mb-3 w-full rounded-xl border px-3.5 py-2.5 text-center font-display text-[12.5px] leading-snug"
+          className="mb-3 w-full shrink-0 rounded-xl border px-3.5 py-2.5 text-center font-display text-[12.5px] leading-snug"
           style={{
             maxWidth: "min(92vw, 380px)",
             color: CONFLICT,
@@ -589,13 +596,19 @@ export function Sudoku({
         </div>
       )}
 
+      {/* board — flexes to the height left between the fixed meta/progress chrome
+          above and the numpad/controls below, sized square by useFitBox so the
+          whole game fits the viewport without scrolling on phones. */}
+      <div ref={boardFitRef} className="flex min-h-0 w-full flex-1 items-center justify-center">
       <div
         className={cn(
-          "grid aspect-square w-full grid-cols-6 overflow-hidden rounded-2xl border-2",
+          "grid grid-cols-6 overflow-hidden rounded-2xl border-2",
           shake && "animate-shake",
         )}
         style={{
-          maxWidth: "min(92vw, 380px)",
+          width: boardSize?.w,
+          height: boardSize?.h,
+          gridTemplateRows: `repeat(${N}, 1fr)`,
           borderColor: `${ACCENT.solid}66`,
           background: `${ACCENT.solid}1a`,
           boxShadow: `0 18px 50px -20px ${ACCENT.solid}59, inset 0 0 40px -28px ${ACCENT.solid}`,
@@ -714,10 +727,11 @@ export function Sudoku({
           );
         })}
       </div>
+      </div>
 
       {/* numpad */}
       <div
-        className="mt-4 grid w-full grid-cols-6 gap-1.5"
+        className="mt-4 grid w-full shrink-0 grid-cols-6 gap-1.5"
         style={{ maxWidth: "min(92vw, 380px)" }}
       >
         {[1, 2, 3, 4, 5, 6].map((n) => {
@@ -748,7 +762,7 @@ export function Sudoku({
 
       {/* undo / redo */}
       <div
-        className="mt-3 flex w-full items-center justify-center gap-3"
+        className="mt-3 flex w-full shrink-0 items-center justify-center gap-3"
         style={{ maxWidth: "min(92vw, 380px)" }}
       >
         <button
@@ -781,7 +795,7 @@ export function Sudoku({
 
       {/* controls */}
       <div
-        className="mt-3 flex w-full items-center justify-center gap-3"
+        className="mt-3 flex w-full shrink-0 items-center justify-center gap-3"
         style={{ maxWidth: "min(92vw, 380px)" }}
       >
         <button
@@ -837,7 +851,7 @@ export function Sudoku({
           type="button"
           onClick={revealSolution}
           className={cn(
-            "mt-3 rounded-pill px-4 py-2 font-display text-[12.5px] text-ink-mute outline-none",
+            "mt-3 shrink-0 rounded-pill px-4 py-2 font-display text-[12.5px] text-ink-mute outline-none",
             !reducedMotion && "transition-colors active:scale-[0.98]",
           )}
           style={{ background: "transparent" }}

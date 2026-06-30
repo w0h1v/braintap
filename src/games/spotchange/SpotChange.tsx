@@ -6,6 +6,7 @@ import { GAME_METAS } from "@/games/_meta";
 import { CompletionModal } from "@/components/play/CompletionModal";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
+import { useFitBox } from "@/lib/useFitBox";
 import { cn } from "@/lib/cn";
 import {
   BLANK_MS,
@@ -107,6 +108,11 @@ export function SpotChange({
   const correct = results.filter(Boolean).length;
   const inputMs = reducedMotion ? INPUT_MS_REDUCED : INPUT_MS;
   const streakBest = bestStreak(results);
+
+  // Size the square grid to the height left between the fixed chrome (header,
+  // status, countdown) and the controls below, so board + controls fit the
+  // viewport without scrolling. The board is square (grid × grid).
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(grid, grid, 420);
 
   const schedule = useCallback((fn: () => void, ms: number) => {
     const t = setTimeout(fn, ms);
@@ -396,9 +402,9 @@ export function SpotChange({
   const showPrimary = (phase === "idle" || phase === "resolved") && !ended && primaryLabel;
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       {/* Status header: round + score chips */}
-      <div className="mb-2.5 flex w-full max-w-[420px] items-center justify-between font-mono text-[10.5px] tracking-[0.12em]">
+      <div className="mb-2.5 flex w-full max-w-[420px] shrink-0 items-center justify-between font-mono text-[10.5px] tracking-[0.12em]">
         <span className="flex items-center gap-2">
           <span style={{ color: ACCENT.soft }}>
             ROUND {Math.min(results.length + (ended ? 0 : 1), totalRounds)}/{totalRounds}
@@ -448,7 +454,7 @@ export function SpotChange({
       <div
         role="status"
         aria-live="polite"
-        className="mb-2.5 flex min-h-[24px] items-center justify-center text-center font-mono text-[13px]"
+        className="mb-2.5 flex min-h-[24px] shrink-0 items-center justify-center text-center font-mono text-[13px]"
         style={{ color: phase === "resolved" && !wasCorrect ? BAD : ACCENT.soft }}
       >
         {message}
@@ -459,7 +465,7 @@ export function SpotChange({
           the pressure is visible. Under reducedMotion we skip the animation
           (the timer still runs) to honour the motion preference. */}
       <div
-        className="mb-3 h-[3px] w-full max-w-[min(92vw,420px)] overflow-hidden rounded-full"
+        className="mb-3 h-[3px] w-full max-w-[min(92vw,420px)] shrink-0 overflow-hidden rounded-full"
         style={{ background: "rgba(255,255,255,0.06)" }}
         aria-hidden="true"
       >
@@ -487,13 +493,21 @@ export function SpotChange({
         )}
       </div>
 
-      {/* Grid */}
+      {/* Grid — flexes to the height left between the fixed chrome above and the
+          controls below, sized square (grid × grid) by useFitBox so board +
+          controls fit the viewport without scrolling. */}
+      <div ref={boardFitRef} className="flex min-h-0 w-full flex-1 items-center justify-center">
       <div
         className={cn(
-          "grid w-full max-w-[min(92vw,420px)] gap-[2.2vw] sm:gap-[9px]",
+          "grid gap-[6px]",
           shake && !reducedMotion && "animate-shake",
         )}
-        style={{ gridTemplateColumns: `repeat(${grid}, 1fr)` }}
+        style={{
+          width: boardSize?.w,
+          height: boardSize?.h,
+          gridTemplateColumns: `repeat(${grid}, 1fr)`,
+          gridTemplateRows: `repeat(${grid}, 1fr)`,
+        }}
         role="grid"
         aria-label="Spot the change grid"
         onKeyDown={onKeyDown}
@@ -579,10 +593,11 @@ export function SpotChange({
           );
         })}
       </div>
+      </div>
 
       {/* Intro / instructions — only before the very first round. */}
       {phase === "idle" && results.length === 0 && !ended && (
-        <p className="mt-4 max-w-[340px] text-center font-mono text-[11.5px] leading-relaxed text-ink-faint">
+        <p className="mt-4 max-w-[340px] shrink-0 text-center font-mono text-[11.5px] leading-relaxed text-ink-faint">
           The grid flashes, then blanks. When it returns, one cell&apos;s colour
           has changed — tap it. Each round is scored on its own; play all{" "}
           {totalRounds}.
@@ -596,7 +611,7 @@ export function SpotChange({
           onClick={() => startRound()}
           aria-label={primaryLabel ?? undefined}
           className={cn(
-            "mt-6 rounded-xl px-8 py-3.5 font-display text-[15px] font-semibold text-[#04060f]",
+            "mt-4 shrink-0 rounded-xl px-8 py-3.5 font-display text-[15px] font-semibold text-[#04060f]",
             reducedMotion ? "" : "transition-transform active:scale-95",
             reducedMotion ? "" : "animate-pop",
           )}
@@ -611,7 +626,7 @@ export function SpotChange({
 
       {/* Keep layout height stable during show/blank/test/resolving. */}
       {(phase === "show" || phase === "blank" || phase === "test" || (phase === "resolved" && isLastRound)) && (
-        <p className="mt-6 h-[20px] text-center font-mono text-[11px] text-ink-faint">
+        <p className="mt-4 h-[20px] shrink-0 text-center font-mono text-[11px] text-ink-faint">
           {phase === "show"
             ? "Hold the colours in mind…"
             : phase === "blank"
@@ -623,7 +638,7 @@ export function SpotChange({
       )}
 
       {ended && (
-        <div className="mt-6 flex flex-col items-center gap-2">
+        <div className="mt-4 flex shrink-0 flex-col items-center gap-2">
           {streakBest > 0 && (
             <p className="font-mono text-[11px] tracking-[0.08em]" style={{ color: GOOD }}>
               🔥 Best streak: {streakBest} in a row

@@ -8,6 +8,7 @@ import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
 import { rngFromString } from "@/lib/rng";
 import { dailySeed } from "@/lib/daily";
+import { useFitBox } from "@/lib/useFitBox";
 import { cn } from "@/lib/cn";
 import {
   SIZE,
@@ -150,6 +151,11 @@ export function Reversi({
   const counts = useMemo(() => score(board), [board]);
   const youMoves = useMemo(() => legalMoves(board, YOU), [board]);
   const youMoveSet = useMemo(() => new Set(youMoves), [youMoves]);
+
+  // Size the 8×8 board to the height left between the fixed score cards /
+  // turn line above and the action bar below, so board + controls fit the
+  // viewport on phones without scrolling (caps at the prior desktop max).
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(SIZE, SIZE, 380);
 
   // Persist resumable state (JSON-serialisable).
   useEffect(() => {
@@ -471,7 +477,7 @@ export function Reversi({
   return (
     <div
       className={cn(
-        "flex w-full flex-col items-center",
+        "flex min-h-0 w-full flex-1 flex-col items-center",
         !reducedMotion && "animate-rise",
       )}
     >
@@ -481,7 +487,7 @@ export function Reversi({
 
       {/* Score cards */}
       <div
-        className="mb-3 grid w-full grid-cols-2 gap-3"
+        className="mb-3 grid w-full shrink-0 grid-cols-2 gap-3"
         style={{ maxWidth: BOARD_MAX }}
       >
         <ScoreCard
@@ -512,7 +518,7 @@ export function Reversi({
 
       {/* Turn indicator */}
       <div
-        className="mb-3 flex min-h-[18px] items-center justify-center text-center font-mono text-[12.5px]"
+        className="mb-3 flex min-h-[18px] shrink-0 items-center justify-center text-center font-mono text-[12.5px]"
         style={{ color: ACCENT.soft }}
         aria-hidden
       >
@@ -536,18 +542,25 @@ export function Reversi({
         <span style={{ color: "#eafcff" }}>{turnLabel}</span>
       </div>
 
-      {/* Board */}
+      {/* Board — flexes to the height left between the fixed score cards /
+          turn line and the action bar, sized square by useFitBox so the whole
+          game fits the viewport (no scroll). */}
+      <div
+        ref={boardFitRef}
+        className="flex min-h-0 w-full flex-1 items-center justify-center"
+      >
       <div
         role="grid"
         aria-label="Reversi board, 8 by 8"
         className={cn(
-          "grid aspect-square w-full grid-cols-8 rounded-2xl border p-1",
+          "grid aspect-square grid-cols-8 rounded-2xl border p-1",
           !reducedMotion && "transition-opacity duration-200",
           // Visibly lock the board while the AI thinks so taps read as ignored.
           aiThinking && "pointer-events-none opacity-60",
         )}
         style={{
-          maxWidth: BOARD_MAX,
+          width: boardSize?.w,
+          height: boardSize?.h,
           gap: "clamp(2px, 0.7vw, 3px)",
           background: `${ACCENT.solid}1a`,
           borderColor: `${ACCENT.solid}3d`,
@@ -675,9 +688,10 @@ export function Reversi({
           );
         })}
       </div>
+      </div>
 
       {/* Actions */}
-      <div className="mt-[18px] flex flex-wrap items-center justify-center gap-2.5">
+      <div className="mt-[18px] flex shrink-0 flex-wrap items-center justify-center gap-2.5">
         {over ? (
           <button
             type="button"
@@ -731,7 +745,7 @@ export function Reversi({
       </div>
 
       {practice && !over && (
-        <p className="mt-2 font-mono text-[10.5px] tracking-[0.12em] text-ink-faint">
+        <p className="mt-2 shrink-0 font-mono text-[10.5px] tracking-[0.12em] text-ink-faint">
           Practice round — today&apos;s result is locked in
         </p>
       )}

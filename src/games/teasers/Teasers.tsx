@@ -305,7 +305,7 @@ export function Teasers({
     : `Riddle ${safeIndex + 1} of ${total}.`;
 
   return (
-    <div className="flex w-full flex-col items-center bt-safe-bottom">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center bt-safe-bottom">
       {/* Visually-hidden live region for screen readers */}
       <p className="sr-only" aria-live="polite" role="status">
         {statusMsg}
@@ -313,7 +313,7 @@ export function Teasers({
 
       {/* Header: game title + score chip */}
       <div
-        className="flex w-full items-center justify-between gap-3"
+        className="flex w-full shrink-0 items-center justify-between gap-3"
         style={{ maxWidth: SURFACE }}
       >
         <div className="min-w-0">
@@ -343,7 +343,7 @@ export function Teasers({
       </div>
 
       {/* Counter + progress bar */}
-      <div className="mt-3 w-full" style={{ maxWidth: SURFACE }}>
+      <div className="mt-3 w-full shrink-0" style={{ maxWidth: SURFACE }}>
         <div className="mb-2 flex items-center justify-between">
           <span
             className="font-mono text-[10.5px] tracking-[0.16em]"
@@ -390,12 +390,18 @@ export function Teasers({
         <span className="sr-only">{progressPct}% complete</span>
       </div>
 
+      {/* Flexible play region: takes the height left between the fixed header /
+          progress and the safe-area bottom, centres the active riddle card, and
+          scrolls internally (never the page) if content can't fit a short
+          viewport. The post-game review lives here too. */}
+      <div className="flex min-h-0 w-full flex-1 flex-col items-center overflow-y-auto py-3">
+
       {/* Riddle card (active play) */}
       {!done && (
       <div
         key={safeIndex}
         className={cn(
-          "relative mt-5 w-full overflow-hidden rounded-[20px] border p-6 sm:p-7",
+          "relative my-auto w-full shrink-0 overflow-hidden rounded-[20px] border p-5 sm:p-7",
           !reducedMotion && "animate-rise",
           shake && !reducedMotion && "animate-shake",
         )}
@@ -429,7 +435,7 @@ export function Teasers({
 
         {/* Options */}
         <div
-          className="relative mt-5 flex flex-col gap-2.5"
+          className="relative mt-4 flex flex-col gap-2 sm:gap-2.5"
           role="radiogroup"
           aria-label="Answer choices"
         >
@@ -621,7 +627,7 @@ export function Teasers({
           correct answer, and the aha — the payoff that used to evaporate on
           finish. Stays visible behind the modal and after it's dismissed. */}
       {done && (
-        <div className="mt-5 flex w-full flex-col gap-3" style={{ maxWidth: SURFACE }}>
+        <div className="my-auto flex w-full shrink-0 flex-col gap-3" style={{ maxWidth: SURFACE }}>
           <div className="flex items-center justify-between">
             <span
               className="font-mono text-[10.5px] tracking-[0.16em]"
@@ -691,6 +697,8 @@ export function Teasers({
           })}
         </div>
       )}
+
+      </div>
 
       <CompletionModal
         open={showModal}

@@ -7,6 +7,7 @@ import { CompletionModal } from "@/components/play/CompletionModal";
 import { playTone, sfx } from "@/lib/sound";
 import { haptics } from "@/lib/haptics";
 import { cn } from "@/lib/cn";
+import { useFitBox } from "@/lib/useFitBox";
 import {
   PADS,
   MAX_ROUNDS,
@@ -88,6 +89,11 @@ export function Simon({
   // Timing: the run clock starts when the player begins and stops at game over,
   // so result.timeMs is reported even though no visible chip is shown.
   const t0Ref = useRef(0);
+
+  // Size the square 2×2 pad board to the height left between the fixed stats/
+  // controls so the whole game fits the viewport on phones (no scroll). The pad
+  // box is square (aspect 1), so cols=rows=1; 300 keeps the desktop max.
+  const { ref: padFitRef, size: padSize } = useFitBox<HTMLDivElement>(1, 1, 300);
 
   const setPhaseBoth = useCallback((p: Phase) => {
     phaseRef.current = p;
@@ -333,7 +339,7 @@ export function Simon({
             : `Game over. You recalled ${finalRounds} step${finalRounds === 1 ? "" : "s"}.`;
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       {/* polite SR status */}
       <span className="sr-only" aria-live="polite">
         {srStatus}
@@ -349,7 +355,7 @@ export function Simon({
       {/* stats */}
       <div
         className={cn(
-          "mb-4 flex w-full items-stretch justify-center gap-3",
+          "mb-4 flex w-full shrink-0 items-stretch justify-center gap-3",
           !reducedMotion && "animate-rise",
         )}
         style={{ maxWidth: "min(92vw, 320px)" }}
@@ -382,7 +388,7 @@ export function Simon({
 
       {/* message */}
       <div
-        className="mb-3 flex min-h-[22px] items-center justify-center text-center font-mono text-[13px]"
+        className="mb-3 flex min-h-[22px] shrink-0 items-center justify-center text-center font-mono text-[13px]"
         style={{ color: phase === "over" ? "#ff8da8" : ACCENT.soft }}
         aria-hidden
       >
@@ -391,7 +397,7 @@ export function Simon({
 
       {/* progress dots — one per step in the current round */}
       <div
-        className="mb-3 flex min-h-[8px] flex-wrap items-center justify-center gap-1.5"
+        className="mb-3 flex min-h-[8px] shrink-0 flex-wrap items-center justify-center gap-1.5"
         style={{ maxWidth: "min(92vw, 320px)" }}
         aria-hidden
       >
@@ -416,15 +422,20 @@ export function Simon({
           })}
       </div>
 
-      {/* pads */}
+      {/* pads — the square 2×2 board flexes to the height left between the fixed
+          stats/controls and is sized by useFitBox so it fits the viewport. */}
+      <div
+        ref={padFitRef}
+        className="flex min-h-0 w-full flex-1 items-center justify-center"
+      >
       <div
         className={cn(
           "grid grid-cols-2 gap-3 rounded-[26px] p-3",
           !reducedMotion && "transition-shadow duration-300",
         )}
         style={{
-          width: "min(92vw, 300px)",
-          aspectRatio: "1",
+          width: padSize?.w,
+          height: padSize?.h,
           background: "rgba(6,10,22,0.55)",
           border: `1px solid ${ACCENT.solid}22`,
           boxShadow: watching
@@ -482,6 +493,7 @@ export function Simon({
           );
         })}
       </div>
+      </div>
 
       {/* start / play again — the host owns the difficulty/speed selector now */}
       <button
@@ -490,7 +502,7 @@ export function Simon({
         disabled={watching || interactive}
         aria-label={played ? "Play again" : "Start sequence"}
         className={cn(
-          "mt-6 min-h-[48px] rounded-xl px-9 py-3.5 font-display text-[15px] font-semibold text-[#04060f] outline-none",
+          "mt-4 min-h-[48px] shrink-0 rounded-xl px-9 py-3.5 font-display text-[15px] font-semibold text-[#04060f] outline-none",
           "focus-visible:ring-2 focus-visible:ring-offset-2",
           !reducedMotion && "transition-transform active:scale-95",
           "disabled:cursor-not-allowed disabled:opacity-40",
@@ -509,7 +521,7 @@ export function Simon({
       {/* idle helper / how-to */}
       {phase === "idle" && (
         <p
-          className="mt-3 max-w-[280px] text-center font-mono text-[11px] leading-relaxed text-ink-faint"
+          className="mt-3 max-w-[280px] shrink-0 text-center font-mono text-[11px] leading-relaxed text-ink-faint"
           style={{ overflowWrap: "break-word" }}
         >
           {played

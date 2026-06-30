@@ -6,6 +6,7 @@ import { GAME_METAS } from "@/games/_meta";
 import { CompletionModal } from "@/components/play/CompletionModal";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
+import { useFitBox } from "@/lib/useFitBox";
 import { cn } from "@/lib/cn";
 import {
   CELLS,
@@ -86,6 +87,10 @@ export function Schulte({
   const boardMax = boardMaxFor(size);
   const gapPx = gapPxFor(size);
   const padPx = padPxFor(size);
+  // Size the square board to the height left between fixed chrome and controls so
+  // board + stats + button fit the viewport on phones (no page scroll). The grid
+  // is square (size × size); cap at the 7×7 desktop max of 420px.
+  const { ref: fitRef, size: boardSize } = useFitBox<HTMLDivElement>(size, size, 420);
 
   // The active grid layout: the deterministic daily grid for this difficulty on
   // first load; a fresh local shuffle on each "Play again".
@@ -382,7 +387,7 @@ export function Schulte({
       : "Press start to begin.";
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       <span className="sr-only" aria-live="polite" role="status">
         {statusText}
       </span>
@@ -390,7 +395,7 @@ export function Schulte({
       {/* stat boxes */}
       <div
         className={cn(
-          "mb-3 flex w-full items-stretch justify-center gap-3",
+          "mb-3 flex w-full shrink-0 items-stretch justify-center gap-3",
           !reducedMotion && "animate-rise",
         )}
         style={{ maxWidth: boardMax }}
@@ -453,7 +458,7 @@ export function Schulte({
 
       {/* progress bar */}
       <div
-        className="mb-2 h-1 w-full overflow-hidden rounded-pill bg-white/[0.06]"
+        className="mb-2 h-1 w-full shrink-0 overflow-hidden rounded-pill bg-white/[0.06]"
         style={{ maxWidth: boardMax }}
         role="presentation"
         aria-hidden
@@ -471,21 +476,27 @@ export function Schulte({
           authoritative live region, so this is hidden from assistive tech to
           avoid two regions talking over each other. */}
       <div
-        className="flex min-h-[20px] items-center justify-center text-center font-mono text-[12.5px]"
+        className="flex min-h-[20px] shrink-0 items-center justify-center text-center font-mono text-[12.5px]"
         style={{ color: message.startsWith("Tap") ? "#ff9bb6" : ACCENT.soft }}
         aria-hidden
       >
         {message}
       </div>
 
-      {/* grid */}
-      <div className="relative mt-2 w-full" style={{ maxWidth: boardMax }}>
+      {/* grid — flexes to the height left between the fixed stats/controls and is
+          sized as a square by useFitBox so the whole game fits the viewport. */}
+      <div ref={fitRef} className="flex min-h-0 w-full flex-1 items-center justify-center">
+      <div
+        className="relative mt-2"
+        style={{ width: boardSize?.w, height: boardSize?.h }}
+      >
         <div
-          className="grid rounded-2xl border"
+          className="grid h-full w-full rounded-2xl border"
           role="grid"
           aria-label={`Schulte table, find numbers 1 to ${max} in order`}
           style={{
             gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${size}, minmax(0, 1fr))`,
             gap: gapPx,
             padding: padPx,
             borderColor: `${ACCENT.solid}33`,
@@ -513,7 +524,7 @@ export function Schulte({
                 disabled={!running}
                 aria-label={`Number ${value}${isFound ? ", found" : ""}`}
                 className={cn(
-                  "flex aspect-square select-none touch-manipulation items-center justify-center rounded-[10px] font-display font-semibold outline-none",
+                  "flex min-h-0 min-w-0 select-none touch-manipulation items-center justify-center rounded-[10px] font-display font-semibold outline-none",
                   "focus-visible:ring-2 focus-visible:ring-offset-0",
                   !reducedMotion &&
                     "transition-[background-color,transform,color,box-shadow] duration-150 active:scale-95",
@@ -522,7 +533,6 @@ export function Schulte({
                   !running && "cursor-default",
                 )}
                 style={{
-                  minHeight: 44,
                   fontSize:
                     size <= 3
                       ? "clamp(20px, 7vw, 30px)"
@@ -567,6 +577,7 @@ export function Schulte({
           </div>
         )}
       </div>
+      </div>
 
       {/* start / play again + abandon */}
       {!running ? (
@@ -575,7 +586,7 @@ export function Schulte({
           type="button"
           onClick={() => start(completedAnyThisMount)}
           className={cn(
-            "mt-5 rounded-[13px] px-9 py-3.5 font-display text-[15px] font-semibold outline-none",
+            "mt-4 shrink-0 rounded-[13px] px-9 py-3.5 font-display text-[15px] font-semibold outline-none",
             "focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent",
             !reducedMotion && "transition-transform active:scale-[0.97]",
           )}
@@ -593,7 +604,7 @@ export function Schulte({
           type="button"
           onClick={abandon}
           className={cn(
-            "mt-5 min-h-[44px] rounded-pill border px-6 py-2.5 font-display text-[13px] text-[#eaf1ff] outline-none",
+            "mt-4 min-h-[44px] shrink-0 rounded-pill border px-6 py-2.5 font-display text-[13px] text-[#eaf1ff] outline-none",
             !reducedMotion && "transition-colors active:scale-[0.98]",
           )}
           style={{ borderColor: "rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)" }}
@@ -605,7 +616,7 @@ export function Schulte({
 
       {/* Surface the keyboard affordances so they are discoverable, not hidden. */}
       {running && (
-        <p className="mt-2 text-center font-mono text-[10px] tracking-[0.12em] text-[rgba(226,234,255,0.4)]">
+        <p className="mt-2 shrink-0 text-center font-mono text-[10px] tracking-[0.12em] text-[rgba(226,234,255,0.4)]">
           TYPE THE NUMBER · ESC TO RESET
         </p>
       )}

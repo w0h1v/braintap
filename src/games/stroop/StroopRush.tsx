@@ -436,7 +436,7 @@ export function StroopRush({
 
   return (
     <div
-      className="flex w-full flex-col items-center"
+      className="flex min-h-0 w-full flex-1 flex-col items-center"
       style={{
         maxWidth: "min(92vw, 380px)",
         // Keep bottom controls clear of the home indicator on notched devices.
@@ -444,7 +444,7 @@ export function StroopRush({
       }}
     >
       {/* stats bar */}
-      <div className="grid w-full grid-cols-3 gap-2.5">
+      <div className="grid w-full shrink-0 grid-cols-3 gap-2.5">
         <StatCard
           value={String(remainingSec)}
           label="SECONDS"
@@ -472,7 +472,7 @@ export function StroopRush({
       {/* personal best for this tier */}
       {best != null && (
         <p
-          className="mt-2 font-mono text-[10px] tracking-[0.12em]"
+          className="mt-2 shrink-0 font-mono text-[10px] tracking-[0.12em]"
           style={{ color: "rgba(226,234,255,0.5)" }}
         >
           PERSONAL BEST · <span style={{ color: ACCENT.soft }}>{best} CORRECT</span>
@@ -489,14 +489,16 @@ export function StroopRush({
         {trialStatus}
       </p>
 
-      {/* word prompt panel */}
+      {/* word prompt panel — flexes to fill the space between the fixed stats bar
+          and the swatch palette so the whole game fits without page scroll. */}
       <div
         className={cn(
-          "relative mt-5 flex w-full items-center justify-center rounded-3xl border",
+          "relative mt-4 flex w-full min-h-0 flex-1 items-center justify-center overflow-hidden rounded-3xl border",
           shake && !reducedMotion && "animate-shake",
         )}
         style={{
-          minHeight: "clamp(120px, 34vw, 168px)",
+          minHeight: "clamp(96px, 24vw, 168px)",
+          maxHeight: "168px",
           background: flash && !reducedMotion
             ? `radial-gradient(circle at center, ${ACCENT.solid}22, rgba(8,12,26,0.55))`
             : "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(8,12,26,0.45))",
@@ -551,7 +553,7 @@ export function StroopRush({
 
       {/* swatch palette */}
       <div
-        className="mt-5 grid w-full gap-2.5"
+        className="mt-4 grid w-full shrink-0 gap-2.5"
         style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
         role="group"
         aria-label="Colour swatches — choose the ink colour"
@@ -611,12 +613,12 @@ export function StroopRush({
       {showStart ? (
         <div
           className={cn(
-            "mt-6 flex w-full flex-col items-center",
+            "mt-4 flex w-full shrink-0 flex-col items-center",
             !reducedMotion && "animate-rise",
           )}
         >
           {phase === "idle" && (
-            <p className="mb-4 px-2 text-center font-display text-[13.5px] leading-relaxed text-[rgba(226,234,255,0.62)]">
+            <p className="mb-3 px-2 text-center font-display text-[13.5px] leading-snug text-[rgba(226,234,255,0.62)]">
               Each round shows a colour word painted in a{" "}
               <span style={{ color: ACCENT.solid }}>different ink</span>. Tap the swatch matching
               the <span style={{ color: ACCENT.solid }}>ink you see</span> — ignore what the word
@@ -641,7 +643,7 @@ export function StroopRush({
           </button>
         </div>
       ) : (
-        <div className="mt-6 flex w-full flex-col items-center gap-3">
+        <div className="mt-4 flex w-full shrink-0 flex-col items-center gap-3">
           <p className="text-center font-mono text-[10.5px] tracking-[0.08em] text-ink-faint">
             TAP THE INK COLOUR · NOT THE WORD
           </p>

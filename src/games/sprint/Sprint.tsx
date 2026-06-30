@@ -7,6 +7,7 @@ import { CompletionModal } from "@/components/play/CompletionModal";
 import { rngFromString } from "@/lib/rng";
 import { haptics } from "@/lib/haptics";
 import { sfx } from "@/lib/sound";
+import { useFitBox } from "@/lib/useFitBox";
 import { cn } from "@/lib/cn";
 import {
   CELLS,
@@ -97,6 +98,14 @@ export function Sprint({
   const [scorePops, setScorePops] = useState<number[]>([]);
   // Screen-reader live status; kept as state so announcements actually fire.
   const [liveStatus, setLiveStatus] = useState("");
+
+  // Size the 4×4 board to the height left between the fixed stats/meter chrome
+  // and the controls below, so board + controls fit the viewport (no scroll).
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(
+    GRID_SIZE,
+    GRID_SIZE,
+    332,
+  );
 
   const deadlineRef = useRef<number | null>(null);
   const refillRef = useRef(refillPtr);
@@ -416,11 +425,11 @@ export function Sprint({
   const showStart = phase === "idle" || phase === "done";
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="flex min-h-0 w-full flex-1 flex-col items-center">
       {/* stats bar. When the host owns the unified timer we suppress our own
           SECONDS chip (timing logic is untouched) and show the win goal so the
           player still knows the per-tier clear target. */}
-      <div className="grid w-full max-w-[420px] grid-cols-3 gap-2.5">
+      <div className="grid w-full max-w-[420px] shrink-0 grid-cols-3 gap-2.5">
         <StatCard
           value={phase === "idle" ? "—" : String(target)}
           label="TARGET"
@@ -450,7 +459,7 @@ export function Sprint({
       </div>
 
       {/* selection status + sum meter */}
-      <div className="mt-4 flex w-full max-w-[420px] flex-col items-center gap-1.5">
+      <div className="mt-4 flex w-full max-w-[420px] shrink-0 flex-col items-center gap-1.5">
         <div className="flex items-center gap-2 font-mono text-[12px] text-[rgba(226,234,255,0.55)]">
           <span>
             Selected sum:{" "}
@@ -501,13 +510,24 @@ export function Sprint({
         {liveStatus}
       </p>
 
-      {/* grid */}
+      {/* grid — flexes to the height left between the fixed stats/meter chrome
+          and the controls below, sized square by useFitBox so it fits the
+          viewport (no scroll). */}
+      <div
+        ref={boardFitRef}
+        className="mt-4 flex min-h-0 w-full flex-1 items-center justify-center"
+      >
       <div
         className={cn(
-          "relative mt-4 grid grid-cols-4 gap-2",
+          "relative grid gap-2",
           shake && !reducedMotion && "animate-shake",
         )}
-        style={{ width: "min(92vw, 332px)" }}
+        style={{
+          width: boardSize?.w,
+          height: boardSize?.h,
+          gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)`,
+          gridTemplateRows: `repeat(${GRID_SIZE}, 1fr)`,
+        }}
         role="grid"
         aria-label="Number grid"
       >
@@ -529,7 +549,7 @@ export function Sprint({
               onFocus={() => setFocusIdx(i)}
               onClick={() => toggleCell(i)}
               className={cn(
-                "flex aspect-square items-center justify-center rounded-xl font-display font-semibold",
+                "flex h-full w-full items-center justify-center rounded-xl font-display font-semibold",
                 "select-none border",
                 !reducedMotion && "transition-[transform,background,box-shadow,border-color] duration-150",
                 !reducedMotion && isPop && "animate-pop",
@@ -539,7 +559,6 @@ export function Sprint({
               )}
               style={{
                 fontSize: "clamp(20px, 6.5vw, 26px)",
-                minHeight: 44,
                 color: isSel ? "#04140d" : "#eafcff",
                 background: isSel
                   ? `linear-gradient(160deg, ${ACCENT.from}, ${ACCENT.to})`
@@ -555,12 +574,13 @@ export function Sprint({
           );
         })}
       </div>
+      </div>
 
       {/* start / replay overlay + instructions */}
       {showStart ? (
         <div
           className={cn(
-            "mt-6 flex w-full max-w-[332px] flex-col items-center",
+            "mt-4 flex w-full max-w-[332px] shrink-0 flex-col items-center",
             !reducedMotion && "animate-rise",
           )}
         >
@@ -589,7 +609,7 @@ export function Sprint({
           </button>
         </div>
       ) : (
-        <div className="mt-6 flex w-full max-w-[332px] flex-col items-center gap-3">
+        <div className="mt-4 flex w-full max-w-[332px] shrink-0 flex-col items-center gap-3">
           <button
             type="button"
             onClick={clearSelection}

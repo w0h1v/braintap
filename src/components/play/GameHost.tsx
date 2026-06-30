@@ -307,7 +307,7 @@ function GameHostInner({
   };
 
   return (
-    <div className="mx-auto flex min-h-[100svh] max-w-shell flex-col px-4 pt-[68px] pb-[max(0.85rem,env(safe-area-inset-bottom))] sm:px-6 sm:pt-24 sm:pb-16">
+    <div className="mx-auto flex min-h-[100svh] max-w-shell flex-col px-4 pt-[62px] pb-[max(0.6rem,env(safe-area-inset-bottom))] sm:px-6 sm:pt-24 sm:pb-16">
       <WinCelebration trigger={winBurst} accent={meta.accent} reducedMotion={Boolean(reducedMotion)} />
       <StreakCelebration trigger={streakBurst} streak={celebStreak} reducedMotion={Boolean(reducedMotion)} />
       {/* header */}
@@ -433,7 +433,7 @@ function GameHostInner({
       )}
 
       {supportsDiff && hintsCfg != null && (
-        <div className="-mt-1 mb-3 flex shrink-0 flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[11px] text-ink-mute sm:mb-4">
+        <div className="-mt-1 mb-3 hidden shrink-0 flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[11px] text-ink-mute sm:mb-4 sm:flex">
           <span aria-hidden>💡</span>
           {flatHints != null ? (
             <span>
@@ -462,7 +462,7 @@ function GameHostInner({
         id={supportsDiff ? "tier-panel" : undefined}
         role={supportsDiff ? "tabpanel" : undefined}
         aria-labelledby={supportsDiff ? `tier-tab-${difficulty}` : undefined}
-        className="flex min-h-0 flex-1 flex-col rounded-3xl border border-line bg-gradient-to-b from-[rgba(11,15,31,0.65)] to-[rgba(6,8,18,0.6)] p-3 sm:p-6"
+        className="flex min-h-0 flex-1 flex-col rounded-3xl border border-line bg-gradient-to-b from-[rgba(11,15,31,0.65)] to-[rgba(6,8,18,0.6)] p-2 sm:p-6"
       >
         <DifficultyContext.Provider value={tierNav}>
           {/* Bounded flex region: a game whose root is `flex-1 min-h-0` fills this
