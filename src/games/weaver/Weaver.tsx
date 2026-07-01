@@ -70,7 +70,7 @@ export function Weaver({
   // word strip, action row, hint) and the found-words list, so the whole game
   // fits a phone viewport without scrolling. The hive keeps its 260/280 aspect
   // ratio; 296 is its existing desktop max width.
-  const { ref: hiveFitRef, size: hiveSize } = useFitBox<HTMLDivElement>(260, 280, 200);
+  const { ref: hiveFitRef, size: hiveSize } = useFitBox<HTMLDivElement>(260, 280, 134);
 
   // Backward-compatible reads of saved state: older or cross-tier saves may hold
   // an `order` that is no longer a permutation of THIS hive's outer letters, or
@@ -484,7 +484,7 @@ export function Weaver({
         disabled={!cur}
         aria-label={cur ? `Current word ${cur}. Tap to delete last letter.` : "Current word, empty"}
         className={cn(
-          "mt-2 flex min-h-[34px] w-full shrink-0 items-center justify-center rounded-xl px-3 sm:mt-3 sm:min-h-[40px]",
+          "mt-1.5 flex min-h-[30px] w-full shrink-0 items-center justify-center rounded-xl px-3 sm:mt-3 sm:min-h-[40px]",
           "transition-colors disabled:cursor-default",
           shake && !reducedMotion && "animate-shake",
         )}
@@ -558,7 +558,7 @@ export function Weaver({
           and is sized to fit by useFitBox (keeps its 260/280 aspect). */}
       <div
         ref={hiveFitRef}
-        className="mt-2 flex min-h-0 w-full flex-1 items-center justify-center sm:mt-3"
+        className="mt-1.5 flex min-h-0 w-full flex-1 items-center justify-center sm:mt-3"
       >
         <Hive
           cells={cells}
@@ -575,7 +575,7 @@ export function Weaver({
       {/* Action buttons — Delete / Shuffle / Enter / Hint share ONE flex-nowrap
           row on mobile (saves a stacked row of vertical space); paddings/gap and
           button heights scale up at sm:. Heights stay >= 40px tap targets. */}
-      <div className="mt-2.5 flex w-full shrink-0 flex-nowrap items-center justify-center gap-1.5 sm:mt-4 sm:gap-3">
+      <div className="mt-2 flex w-full shrink-0 flex-nowrap items-center justify-center gap-1.5 sm:mt-4 sm:gap-3">
         <button
           type="button"
           onClick={del}
@@ -636,19 +636,21 @@ export function Weaver({
           so the hive + controls always win the vertical budget on small phones.
           The list is capped low on mobile (scrolls internally) so it never grows
           the page; it expands at sm:. */}
-      <div className="mt-2.5 flex min-h-0 w-full shrink flex-col sm:mt-4">
+      <div className="mt-2 flex min-h-0 w-full shrink flex-col sm:mt-4">
         <div className="mb-1.5 flex shrink-0 items-center justify-between font-mono text-[10px] tracking-[0.16em] text-ink-faint sm:mb-2">
           <span>FOUND · {found.length}</span>
           <span>{total - found.length} LEFT</span>
         </div>
         {found.length === 0 ? (
           <div
-            className="shrink-0 rounded-xl border border-dashed px-4 py-3 text-center font-mono text-[11px] text-ink-faint sm:py-5"
+            className="shrink-0 rounded-xl border border-dashed px-3 py-1.5 text-center font-mono text-[10.5px] text-ink-faint sm:px-4 sm:py-5 sm:text-[11px]"
             style={{ borderColor: "rgba(255,255,255,0.1)" }}
           >
             Words you find appear here.
-            <br />
-            Find one using all 7 letters for a ✨ pangram bonus.
+            <span className="hidden sm:inline">
+              <br />
+              Find one using all 7 letters for a ✨ pangram bonus.
+            </span>
           </div>
         ) : (
           <div

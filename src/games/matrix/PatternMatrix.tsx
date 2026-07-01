@@ -203,9 +203,11 @@ export function PatternMatrix({
 
   // Size the square 3x3 board to the height left between the fixed meta row and
   // the prompt/options/controls below, so the whole game fits without scroll.
-  // Cap kept modest so the board never wins more height than needed on short
-  // phones; the flex-1 region still absorbs slack and grows to this cap.
-  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(1, 1, 256);
+  // Cap kept tight so the board never wins more height than needed on short
+  // phones (iPhone SE): the fixed prompt/options/controls stack is what pushes
+  // the fold, so we let the board yield height to them. The flex-1 region still
+  // absorbs slack and grows to this cap on taller screens.
+  const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(1, 1, 208);
 
   // Resuming a finished puzzle should re-surface the celebratory/result modal
   // (MOB: persisted done state otherwise loses the share + recap entirely).
@@ -427,7 +429,10 @@ export function PatternMatrix({
   const tileSize = boardSize
     ? `${Math.max(0, (boardSize.w - 12 - 12) / 3)}px`
     : "min(26vw, 96px)";
-  const optSize = puzzle.optionCount <= 4 ? "min(16vw, 60px)" : "min(13.5vw, 52px)";
+  // Glyph fills ~86% of the option button so it scales with the button's own
+  // responsive cap (max-w-56px mobile / 72px sm+) and never overflows the
+  // tighter mobile tile — no separate breakpoint math needed.
+  const optSize = "86%";
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col items-center">
@@ -442,7 +447,7 @@ export function PatternMatrix({
       {/* meta row: tier + strike pips + timer */}
       <div
         className={cn(
-          "mb-2 flex w-full shrink-0 items-center justify-between font-mono text-[11px] text-ink-mute sm:mb-3",
+          "mb-1.5 flex w-full shrink-0 items-center justify-between font-mono text-[10.5px] text-ink-mute sm:mb-3 sm:text-[11px]",
           !reducedMotion && "animate-rise",
         )}
         style={{ maxWidth: "min(92vw, 380px)" }}
@@ -555,13 +560,13 @@ export function PatternMatrix({
           revealing rules never pushes the controls below the fold. */}
       {revealedRules.length > 0 && (
         <div
-          className="mt-2 max-h-[18vh] w-full shrink-0 overflow-y-auto rounded-xl border p-2 text-left sm:mt-3 sm:max-h-none sm:p-3"
+          className="mt-1.5 max-h-[64px] w-full shrink-0 overflow-y-auto rounded-xl border p-1.5 text-left sm:mt-3 sm:max-h-none sm:p-3"
           style={{ maxWidth: "min(92vw, 380px)", background: `${ACCENT.solid}10`, borderColor: `${ACCENT.solid}33` }}
         >
-          <div className="font-mono text-[10px] tracking-[0.16em]" style={{ color: ACCENT.soft }}>
+          <div className="font-mono text-[9.5px] tracking-[0.16em] sm:text-[10px]" style={{ color: ACCENT.soft }}>
             💡 RULES REVEALED
           </div>
-          <ul className="mt-1 space-y-0.5 text-[12px] leading-snug text-[rgba(226,234,255,0.85)] sm:mt-1.5 sm:space-y-1 sm:text-[13px]">
+          <ul className="mt-0.5 space-y-0.5 text-[11.5px] leading-snug text-[rgba(226,234,255,0.85)] sm:mt-1.5 sm:space-y-1 sm:text-[13px]">
             {revealedRules.map((ri) => (
               <li key={ri}>· {describeRule(puzzle.rules[ri])}</li>
             ))}
@@ -569,8 +574,15 @@ export function PatternMatrix({
         </div>
       )}
 
-      {/* prompt */}
-      <p className="mt-2 shrink-0 text-center font-display text-[12.5px] text-ink-soft sm:mt-4 sm:text-[13.5px]" style={{ maxWidth: "min(92vw, 380px)" }}>
+      {/* prompt — compact on mobile; only shown when it carries a result beat,
+          otherwise hidden to reclaim the fold (the options make the ask obvious). */}
+      <p
+        className={cn(
+          "mt-1.5 shrink-0 text-center font-display text-[12px] text-ink-soft sm:mt-4 sm:text-[13.5px]",
+          !done && "hidden sm:block",
+        )}
+        style={{ maxWidth: "min(92vw, 380px)" }}
+      >
         {done
           ? won
             ? "Solved — nicely reasoned."
@@ -580,7 +592,7 @@ export function PatternMatrix({
 
       {/* options strip */}
       <div
-        className="mt-2 grid w-full shrink-0 justify-items-center gap-1.5 sm:mt-3 sm:gap-2"
+        className="mt-1.5 grid w-full shrink-0 justify-items-center gap-1.5 sm:mt-3 sm:gap-2"
         style={{
           maxWidth: "min(92vw, 380px)",
           gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
@@ -613,7 +625,7 @@ export function PatternMatrix({
               disabled={done || isPickedWrong}
               onClick={() => handleSelect(i)}
               className={cn(
-                "flex aspect-square min-h-[38px] min-w-[38px] w-full max-w-[72px] items-center justify-center rounded-xl outline-none sm:min-h-[44px] sm:min-w-[44px]",
+                "flex aspect-square min-h-[38px] min-w-[38px] w-full max-w-[56px] items-center justify-center rounded-xl outline-none sm:max-w-[72px] sm:min-h-[44px] sm:min-w-[44px]",
                 !reducedMotion && "transition-[transform,background-color,border-color] duration-150",
                 !reducedMotion && shakeIdx === i && "animate-shake",
                 !reducedMotion && popIdx === i && "animate-pop",
@@ -643,7 +655,7 @@ export function PatternMatrix({
       {/* controls: during play → confirm + hint; after → replay + view result
           so the player can recover even after dismissing the modal. */}
       <div
-        className="mt-2.5 flex w-full shrink-0 items-center justify-center gap-2 sm:mt-4 sm:gap-3"
+        className="mt-1.5 flex w-full shrink-0 items-center justify-center gap-2 sm:mt-4 sm:gap-3"
         style={{ maxWidth: "min(92vw, 380px)" }}
       >
         {done ? (
@@ -652,7 +664,7 @@ export function PatternMatrix({
               type="button"
               onClick={handleReplay}
               className={cn(
-                "min-h-[42px] flex-1 rounded-pill px-4 py-2 font-display text-[14px] font-semibold text-[#04060f] outline-none sm:min-h-[48px] sm:px-5 sm:py-3 sm:text-[15px]",
+                "min-h-[38px] flex-1 rounded-pill px-4 py-1.5 font-display text-[14px] font-semibold text-[#04060f] outline-none sm:min-h-[48px] sm:px-5 sm:py-3 sm:text-[15px]",
                 !reducedMotion && "transition-transform active:scale-[0.98]",
               )}
               style={{ backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})` }}
@@ -662,7 +674,7 @@ export function PatternMatrix({
             <button
               type="button"
               onClick={() => setShowModal(true)}
-              className="min-h-[42px] rounded-pill border px-4 py-2 font-display text-[14px] font-semibold outline-none sm:min-h-[48px] sm:px-5 sm:py-3 sm:text-[15px]"
+              className="min-h-[38px] rounded-pill border px-4 py-1.5 font-display text-[14px] font-semibold outline-none sm:min-h-[48px] sm:px-5 sm:py-3 sm:text-[15px]"
               style={{ borderColor: `${ACCENT.solid}55`, background: `${ACCENT.solid}14`, color: ACCENT.soft }}
             >
               View result
@@ -675,7 +687,7 @@ export function PatternMatrix({
               onClick={confirm}
               disabled={selected == null}
               className={cn(
-                "min-h-[42px] flex-1 rounded-pill px-4 py-2 font-display text-[14px] font-semibold text-[#04060f] outline-none disabled:opacity-40 sm:min-h-[48px] sm:px-5 sm:py-3 sm:text-[15px]",
+                "min-h-[38px] flex-1 rounded-pill px-4 py-1.5 font-display text-[14px] font-semibold text-[#04060f] outline-none disabled:opacity-40 sm:min-h-[48px] sm:px-5 sm:py-3 sm:text-[15px]",
                 !reducedMotion && "transition-transform active:scale-[0.98]",
               )}
               style={{ backgroundImage: `linear-gradient(118deg, ${ACCENT.from}, ${ACCENT.to})` }}
@@ -688,7 +700,7 @@ export function PatternMatrix({
               onHint={handleHint}
               accent={ACCENT}
               disabled={done}
-              className="!min-h-[42px] !px-3 !py-2 sm:!min-h-[44px] sm:!px-4 sm:!py-2.5"
+              className="!min-h-[38px] !px-3 !py-1.5 sm:!min-h-[44px] sm:!px-4 sm:!py-2.5"
             />
           </>
         )}

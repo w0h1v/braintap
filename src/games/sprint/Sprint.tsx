@@ -103,10 +103,12 @@ export function Sprint({
   // and the controls below, so board + controls fit the viewport (no scroll).
   // The board is the flex-1 slack absorber, so a tighter cap (vs round 1's 332)
   // is the largest single lever for fitting board + chrome on a short phone.
+  // Round 3: lowered further (268 -> 248) so the board yields more height to the
+  // fixed chrome on iPhone SE — the board can be a touch smaller and still play.
   const { ref: boardFitRef, size: boardSize } = useFitBox<HTMLDivElement>(
     GRID_SIZE,
     GRID_SIZE,
-    268,
+    248,
   );
 
   const deadlineRef = useRef<number | null>(null);
@@ -431,7 +433,7 @@ export function Sprint({
       {/* stats bar. When the host owns the unified timer we suppress our own
           SECONDS chip (timing logic is untouched) and show the win goal so the
           player still knows the per-tier clear target. */}
-      <div className="grid w-full max-w-[420px] shrink-0 grid-cols-3 gap-2 sm:gap-2.5">
+      <div className="grid w-full max-w-[420px] shrink-0 grid-cols-3 gap-1.5 sm:gap-2.5">
         <StatCard
           value={phase === "idle" ? "—" : String(target)}
           label="TARGET"
@@ -461,7 +463,7 @@ export function Sprint({
       </div>
 
       {/* selection status + sum meter */}
-      <div className="mt-2.5 flex w-full max-w-[420px] shrink-0 flex-col items-center gap-1.5 sm:mt-4">
+      <div className="mt-1.5 flex w-full max-w-[420px] shrink-0 flex-col items-center gap-1 sm:mt-4 sm:gap-1.5">
         <div className="flex items-center gap-2 font-mono text-[12px] text-[rgba(226,234,255,0.55)]">
           <span>
             Selected sum:{" "}
@@ -517,11 +519,11 @@ export function Sprint({
           viewport (no scroll). */}
       <div
         ref={boardFitRef}
-        className="mt-2.5 flex min-h-0 w-full flex-1 items-center justify-center sm:mt-4"
+        className="mt-1.5 flex min-h-0 w-full flex-1 items-center justify-center sm:mt-4"
       >
       <div
         className={cn(
-          "relative grid gap-2",
+          "relative grid gap-1.5 sm:gap-2",
           shake && !reducedMotion && "animate-shake",
         )}
         style={{
@@ -582,12 +584,12 @@ export function Sprint({
       {showStart ? (
         <div
           className={cn(
-            "mt-2.5 flex w-full max-w-[332px] shrink-0 flex-col items-center sm:mt-4",
+            "mt-1.5 flex w-full max-w-[332px] shrink-0 flex-col items-center sm:mt-4",
             !reducedMotion && "animate-rise",
           )}
         >
           {phase === "idle" && (
-            <p className="mb-2.5 px-2 text-center font-display text-[12.5px] leading-snug text-[rgba(226,234,255,0.62)] sm:mb-4 sm:text-[13.5px] sm:leading-relaxed">
+            <p className="mb-2 px-2 text-center font-display text-[11.5px] leading-snug text-[rgba(226,234,255,0.62)] sm:mb-4 sm:text-[13.5px] sm:leading-relaxed">
               Tap cells that{" "}
               <span style={{ color: ACCENT.solid }}>add up to the target</span> before the{" "}
               {DURATION_SEC}-second clock runs out. Go too high and only that last tap is undone —
@@ -598,7 +600,7 @@ export function Sprint({
             type="button"
             onClick={start}
             className={cn(
-              "rounded-xl px-9 py-2.5 font-display text-[15px] font-semibold text-[#04060f] sm:py-3.5",
+              "rounded-xl px-9 py-2 font-display text-[15px] font-semibold text-[#04060f] sm:py-3.5",
               !reducedMotion && "transition-transform duration-200 hover:-translate-y-0.5",
               "active:scale-95",
             )}
@@ -611,13 +613,13 @@ export function Sprint({
           </button>
         </div>
       ) : (
-        <div className="mt-2.5 flex w-full max-w-[332px] shrink-0 flex-col items-center gap-2 sm:mt-4 sm:gap-3">
+        <div className="mt-1.5 flex w-full max-w-[332px] shrink-0 flex-col items-center gap-1.5 sm:mt-4 sm:gap-3">
           <button
             type="button"
             onClick={clearSelection}
             disabled={selected.size === 0}
             className={cn(
-              "min-h-[40px] rounded-xl border px-5 py-2 font-display text-[13px] font-semibold sm:min-h-0",
+              "min-h-[36px] rounded-xl border px-5 py-1.5 font-display text-[13px] font-semibold sm:min-h-0 sm:py-2",
               !reducedMotion && "transition-[opacity,transform] duration-150 active:scale-95",
               selected.size === 0
                 ? "cursor-default opacity-40"
@@ -628,7 +630,10 @@ export function Sprint({
           >
             Clear selection
           </button>
-          <p className="max-w-[332px] text-center font-mono text-[10px] leading-snug tracking-[0.08em] text-ink-faint sm:text-[10.5px]">
+          {/* Non-essential helper prose: hidden on mobile (the live sum meter and
+              "over by N" cue already convey the rule) so it never costs SE height;
+              restored from sm: up. */}
+          <p className="hidden max-w-[332px] text-center font-mono leading-snug tracking-[0.08em] text-ink-faint sm:block sm:text-[10.5px]">
             TAP CELLS THAT SUM TO THE TARGET · TOO HIGH UNDOES THE LAST TAP
           </p>
         </div>
@@ -683,7 +688,7 @@ function StatCard({
   return (
     <div
       className={cn(
-        "relative flex flex-col items-center justify-center overflow-hidden rounded-2xl px-2 py-2 sm:py-3",
+        "relative flex flex-col items-center justify-center overflow-hidden rounded-2xl px-2 py-1.5 sm:py-3",
         pulse && "animate-pulse2",
       )}
       style={{
@@ -694,13 +699,13 @@ function StatCard({
       }}
     >
       <div
-        className="font-display text-[28px] font-semibold leading-none transition-colors duration-150 sm:text-[34px]"
+        className="font-display text-[24px] font-semibold leading-none transition-colors duration-150 sm:text-[34px]"
         style={{ color: flash && flashColor ? flashColor : color }}
       >
         {value}
       </div>
       <div
-        className="mt-1 font-mono text-[9.5px] tracking-[0.14em] sm:mt-1.5"
+        className="mt-0.5 font-mono text-[8.5px] tracking-[0.12em] sm:mt-1.5 sm:text-[9.5px] sm:tracking-[0.14em]"
         style={{ color: accentBorder ? ACCENT.soft : "rgba(226,234,255,0.45)" }}
       >
         {label}
