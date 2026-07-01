@@ -311,11 +311,11 @@ function GameHostInner({
       <WinCelebration trigger={winBurst} accent={meta.accent} reducedMotion={Boolean(reducedMotion)} />
       <StreakCelebration trigger={streakBurst} streak={celebStreak} reducedMotion={Boolean(reducedMotion)} />
       {/* header */}
-      <div className="mb-3 flex shrink-0 items-center justify-between gap-3 sm:mb-4">
+      <div className="mb-2 flex shrink-0 items-center justify-between gap-3 sm:mb-4">
         <Link
           href="/"
           onClick={() => void maybeInterstitial("return-home")}
-          className="flex items-center gap-2 rounded-xl border border-line-strong bg-white/[0.03] px-3 py-2 font-mono text-xs text-ink-soft transition-colors hover:text-ink"
+          className="flex items-center gap-2 rounded-xl border border-line-strong bg-white/[0.03] px-3 py-1.5 font-mono text-xs text-ink-soft transition-colors hover:text-ink sm:py-2"
         >
           ← Today
         </Link>
@@ -366,7 +366,7 @@ function GameHostInner({
 
       {/* difficulty tier bar + timer */}
       {supportsDiff && (
-        <div className="mb-3 flex shrink-0 flex-col gap-2 sm:mb-4 sm:flex-row sm:items-center sm:justify-between sm:gap-2.5">
+        <div className="mb-2 flex shrink-0 flex-col gap-2 sm:mb-4 sm:flex-row sm:items-center sm:justify-between sm:gap-2.5">
           <div
             role="tablist"
             aria-label="Difficulty"
