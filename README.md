@@ -54,6 +54,8 @@ stored in `localStorage`. No account or backend required to play.
 | `npm test` | Full Vitest suite (solvability + engine correctness) |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | `next lint` |
+| `npm run build:mobile` | Static export to `out/` for the Capacitor shell |
+| `npm run sync:ios` | `build:mobile` + `npx cap sync ios` (run before archiving in Xcode) |
 
 ## Architecture
 

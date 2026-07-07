@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Required for the native Sign in with Apple flow (src/lib/native/exchange.ts)
+	     and by App Store Guideline 4.8 since Google sign-in ships. The matching
+	     capability must also be enabled on the App ID in the Apple Developer portal. -->
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+</dict>
+</plist>

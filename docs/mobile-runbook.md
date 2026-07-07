@@ -10,7 +10,7 @@ on the website, so `braintap.vercel.app` behaves exactly as before.
 
 ## Implemented (on `main`, web-inert)
 
-- **Native iOS Capacitor shell** in `ios/` (Capacitor 7, **Swift Package
+- **Native iOS Capacitor shell** in `ios/` (Capacitor 8, **Swift Package
   Manager** — no CocoaPods). `npm run build:mobile` → `out/`, then
   `npx cap sync ios`. **Verified**: `xcodebuild ... BUILD SUCCEEDED` and the app
   **launches in the iOS simulator**; both plugins resolve via SPM
@@ -53,6 +53,35 @@ on the website, so `braintap.vercel.app` behaves exactly as before.
   interstitial every **3rd** transition AND ≤ once / **3 min**,
   `premiumUnlocksArchive: true`), retunable via `setMonetizationConfig()`.
 
+### Store-compliance sprint (2026-07-07, `feat/store-compliance`)
+
+- **In-app account deletion** (Guideline 5.1.1(v)): edge function
+  `supabase/functions/delete-account` (verifies the caller's JWT, calls
+  `auth.admin.deleteUser`; profiles/game_results cascade) + a confirm-to-delete
+  flow on the Profile page (`useAuth().deleteAccount`).
+- **UGC moderation** (Guideline 1.2): migration `0005_ugc_compliance.sql` —
+  charset + profanity check on usernames (`is_username_allowed`, NOT VALID
+  constraint, `handle_new_user` falls back to `player_xxxxxx`), plus a
+  `report_leaderboard_name` RPC + `leaderboard_reports` table. Client twin in
+  `src/lib/username.ts` (signup validation) and a ⚑ report button on
+  leaderboard rows. **Keep the two blocklists in sync.**
+- **Support contact**: `src/lib/support.ts` → **support@braintap.app** on the
+  privacy + terms pages (set up this mailbox before submission).
+- **UMP consent (EEA/UK)**: `requestConsentInfo`/`showConsentForm` run before
+  `AdMob.initialize` in `src/lib/ads/index.ts`. The form only appears once a
+  consent *message* is configured for the app in the AdMob console — that part
+  is still human work.
+- **Ads test-mode flip is now automatic**: `initializeForTesting` is true only
+  while the `NEXT_PUBLIC_ADMOB_*` ids are unset — setting both real ids IS the
+  release flip (no code change).
+- **iOS shell**: `App/App.entitlements` with the **Sign in with Apple**
+  capability (wired via `CODE_SIGN_ENTITLEMENTS`); **iPhone-only**
+  (`TARGETED_DEVICE_FAMILY = 1`) and **portrait-only**; full Google
+  SKAdNetworkItems list; `ITSAppUsesNonExemptEncryption=false`. AppIcon/Splash
+  PNGs are now exempt from the root `*.png` gitignore and committed.
+- `npm run sync:ios` = `build:mobile` + `cap sync ios` — always run before
+  archiving so the bundled web assets aren't stale.
+
 ### RevenueCat catalog — configured (Test Store only)
 
 Project **Braintap** (`proj32ced423`), verified via the v2 API. The chain is
@@ -72,11 +101,11 @@ real apps (below).
 
 0. **Native auth (Sign in with Apple + Google).** Apple Developer: enable SIWA on
    the App ID, create a Services ID + `.p8` key. Google Cloud: iOS + web OAuth
-   clients. Xcode: add the SIWA capability (+ entitlement/signing) and the
-   reversed-client-id URL scheme; bundle `PrivacyInfo.xcprivacy`. Supabase: enable
-   Apple + Google providers (authorized client ids). Set
-   `NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID` / `_WEB_CLIENT_ID`. Full ordered steps in
-   PR #12.
+   clients. Xcode: set the **team/signing** and fill in the real
+   reversed-client-id URL scheme in `Info.plist` (the SIWA entitlement file is
+   already wired). Supabase: enable Apple + Google providers (authorized client
+   ids). Set `NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID` / `_WEB_CLIENT_ID`. Full ordered
+   steps in PR #12.
 1. **Real store apps + products + public SDK keys.** Add a real **iOS app** and
    **Android app** to the RevenueCat project (this generates the public
    `appl_…` / `goog_…` SDK keys → set `NEXT_PUBLIC_REVENUECAT_*`). Create the
@@ -85,7 +114,10 @@ real apps (below).
    Google $25 accounts.)
 2. **Real AdMob ids.** Create the app + a **rewarded** and **interstitial** unit
    in AdMob; set `NEXT_PUBLIC_ADMOB_*` and the real `GADApplicationIdentifier`
-   (iOS) / Android manifest app id. Test units are wired meanwhile.
+   (iOS) / Android manifest app id. Test units are wired meanwhile (and test
+   mode switches off automatically once both env ids are set). Also configure a
+   **UMP consent message** for the app in the AdMob console — the client code
+   already shows it when required.
 3. **Android shell.** `cap add android` needs a **JDK** (not installed on the
    build machine). Install a JDK + Android Studio, then `npx cap add android` →
    `npm run build:mobile && npx cap sync android`.
@@ -95,11 +127,11 @@ real apps (below).
    threshold → a test rewarded ad. Requires Apple code-signing for a real device.
 5. **Consent / privacy / store compliance.** We ship **non-personalized ads (no
    ATT prompt)** — no `NSUserTrackingUsageDescription`, `npa:true` per request,
-   and a `PrivacyInfo.xcprivacy` with `NSPrivacyTracking=false`. EEA/UK still
-   needs a Google **UMP** consent message (not yet implemented) before monetizing
-   that traffic. Privacy policy updated for AdMob + RevenueCat + sign-in; complete
-   App Store **App Privacy** (email + user id + gameplay, Linked, NOT tracking) +
-   Play **Data safety** forms.
+   and a `PrivacyInfo.xcprivacy` with `NSPrivacyTracking=false`. The UMP consent
+   *code* is implemented (see sprint above); the consent *message* must be
+   configured in the AdMob console. Complete App Store **App Privacy** (email +
+   user id + gameplay, Linked, NOT tracking) + Play **Data safety** forms, and
+   set up the **support@braintap.app** mailbox referenced by the policy pages.
 6. **Responsive** — the 20 games were visually inspected at iPhone width (393px)
    and render cleanly; re-check the paywall / rewarded-ad surfaces once they're
    testable on device.

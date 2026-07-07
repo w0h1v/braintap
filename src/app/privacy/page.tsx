@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Card, Pill } from "@/components/ui/Card";
+import { SUPPORT_EMAIL } from "@/lib/support";
 
 export const metadata: Metadata = {
   title: "Privacy — BrainTap Games",
@@ -97,9 +98,13 @@ const SECTIONS: { heading: string; body: React.ReactNode }[] = [
     body: (
       <>
         You can clear local progress at any time from your browser settings or the
-        in-app reset option. If you have an account, you can request that we
-        delete it and the data associated with it by contacting us. Deleting your
-        account removes your synced progress from our records.
+        in-app reset option. If you have an account, you can permanently delete it
+        — along with your synced results, streaks, and leaderboard entries — from
+        the <strong>Profile</strong> page, or by emailing us at{" "}
+        <a href={`mailto:${SUPPORT_EMAIL}`} className="text-cyan hover:text-cyan-soft">
+          {SUPPORT_EMAIL}
+        </a>
+        . Deleting your account removes your synced progress from our records.
       </>
     ),
   },
@@ -128,8 +133,11 @@ const SECTIONS: { heading: string; body: React.ReactNode }[] = [
     heading: "Contact",
     body: (
       <>
-        Questions about privacy? Reach out to BrainTap Labs and we will do our
-        best to help.
+        Questions about privacy? Email BrainTap Labs at{" "}
+        <a href={`mailto:${SUPPORT_EMAIL}`} className="text-cyan hover:text-cyan-soft">
+          {SUPPORT_EMAIL}
+        </a>{" "}
+        and we will do our best to help.
       </>
     ),
   },
@@ -144,7 +152,7 @@ export default function PrivacyPage() {
           Privacy Policy
         </h1>
         <p className="mt-4 font-mono text-[11px] tracking-[0.14em] text-ink-mute">
-          LAST UPDATED · JUNE 24, 2026
+          LAST UPDATED · JULY 7, 2026
         </p>
       </header>
 

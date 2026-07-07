@@ -5,7 +5,12 @@ import Link from "next/link";
 import { Card, Pill } from "@/components/ui/Card";
 import { GameIcon } from "@/components/GameIcon";
 import { GAME_METAS, GAME_ORDER, ROTATION } from "@/lib/games";
-import { getDailyLeaderboard, getLiveCount, type LeaderboardEntry } from "@/lib/leaderboard";
+import {
+  getDailyLeaderboard,
+  getLiveCount,
+  reportLeaderboardName,
+  type LeaderboardEntry,
+} from "@/lib/leaderboard";
 import { useProgress } from "@/lib/progress";
 import { todayISO } from "@/lib/daily";
 import type { GameId, Difficulty } from "@/lib/types";
@@ -83,6 +88,16 @@ export default function LeaderboardPage() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [liveTarget, setLiveTarget] = useState(0);
+  const [reportedNames, setReportedNames] = useState<ReadonlySet<string>>(new Set());
+
+  // App Store Guideline 1.2: players can flag an objectionable display name.
+  async function onReportName(name: string) {
+    if (reportedNames.has(name)) return;
+    const ok = window.confirm(`Report the name “${name}” as objectionable?`);
+    if (!ok) return;
+    setReportedNames((prev) => new Set(prev).add(name));
+    void reportLeaderboardName(name);
+  }
 
   // Pick today's featured game on the client, post-mount (avoids the build-time
   // vs client-weekday hydration mismatch).
@@ -390,6 +405,27 @@ export default function LeaderboardPage() {
                   >
                     {e.isYou ? "You" : e.name}
                   </span>
+                  {!e.isYou ? (
+                    <button
+                      type="button"
+                      onClick={() => onReportName(e.name)}
+                      disabled={reportedNames.has(e.name)}
+                      aria-label={
+                        reportedNames.has(e.name)
+                          ? `Reported ${e.name}`
+                          : `Report the name ${e.name}`
+                      }
+                      title={reportedNames.has(e.name) ? "Reported" : "Report this name"}
+                      className={cn(
+                        "shrink-0 rounded-md px-1 font-mono text-[11px] transition-colors",
+                        reportedNames.has(e.name)
+                          ? "cursor-default text-[#ff9db0]"
+                          : "text-ink-mute/50 hover:text-[#ff9db0]",
+                      )}
+                    >
+                      ⚑
+                    </button>
+                  ) : null}
                   <span className="shrink-0 font-mono text-[11px] text-ink-mute">
                     {fmtTime(e.timeMs)}
                   </span>
