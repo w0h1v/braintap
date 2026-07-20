@@ -11,8 +11,9 @@
  * execution.
  *
  * Ad-unit ids default to Google's official TEST units so a native build shows
- * test ads out of the box; set `NEXT_PUBLIC_ADMOB_*` to your real units for
- * release. The native AdMob *app id* must also be set in the iOS Info.plist
+ * test ads out of the box; set BOTH `NEXT_PUBLIC_ADMOB_*` ids to your real
+ * units for release — that also switches the SDK off test mode. The native
+ * AdMob *app id* must also be set in the iOS Info.plist
  * (`GADApplicationIdentifier`) / Android manifest — see docs/mobile-runbook.md.
  */
 import { Capacitor } from "@capacitor/core";
@@ -47,16 +48,33 @@ function interstitialAdId(): string {
   );
 }
 
+// Real ad units configured → live traffic; otherwise stay on test mode. This
+// makes the release flip a pure env-var change (plus the native app ids).
+const REAL_ADS_CONFIGURED = Boolean(
+  process.env.NEXT_PUBLIC_ADMOB_REWARDED_ID && process.env.NEXT_PUBLIC_ADMOB_INTERSTITIAL_ID,
+);
+
 /** Initialize the AdMob SDK exactly once per app session. */
 let initPromise: Promise<void> | null = null;
 function ensureInit(): Promise<void> {
   if (!initPromise) {
     initPromise = (async () => {
-      const { AdMob } = await import("@capacitor-community/admob");
-      // `initializeForTesting` keeps us on test traffic; flip to false (and set
-      // real ad-unit ids) before submission. We serve NON-PERSONALIZED ads only
-      // (npa:true per request) and never call ATT, so no tracking prompt fires.
-      await AdMob.initialize({ initializeForTesting: true });
+      const { AdMob, AdmobConsentStatus } = await import("@capacitor-community/admob");
+      // Google UMP consent (EEA/UK): show the consent form when Google says one
+      // is required. The form only exists once a consent message is configured
+      // for the app in the AdMob console; until then (and everywhere consent
+      // isn't required) this resolves without UI. Failures never block ads init
+      // — we serve NON-PERSONALIZED ads only (npa:true per request) and never
+      // call ATT, so no tracking prompt fires either way.
+      try {
+        const consent = await AdMob.requestConsentInfo();
+        if (consent.status === AdmobConsentStatus.REQUIRED && consent.isConsentFormAvailable) {
+          await AdMob.showConsentForm();
+        }
+      } catch (e) {
+        console.warn("[ads] consent flow failed", e);
+      }
+      await AdMob.initialize({ initializeForTesting: !REAL_ADS_CONFIGURED });
     })();
   }
   return initPromise;

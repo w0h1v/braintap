@@ -82,6 +82,24 @@ export async function getLiveCount(dateISO: string = todayISO()): Promise<number
   return 0;
 }
 
+/**
+ * Report an objectionable display name seen on a leaderboard (App Store
+ * Guideline 1.2). Fire-and-forget; resolves false on any failure. Never throws.
+ */
+export async function reportLeaderboardName(name: string, reason?: string): Promise<boolean> {
+  const supabase = getSupabaseBrowser();
+  if (!supabase || !name) return false;
+  try {
+    const { error } = await supabase.rpc("report_leaderboard_name", {
+      reported: name,
+      reason: reason ?? null,
+    });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 /** Best-effort: the signed-in user's username, for highlighting their row. */
 async function currentUsername(
   supabase: NonNullable<ReturnType<typeof getSupabaseBrowser>>,

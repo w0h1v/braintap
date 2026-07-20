@@ -7,6 +7,7 @@ import { Logo } from "@/components/GameIcon";
 import { Card } from "@/components/ui/Card";
 import { Button, GhostButton } from "@/components/ui/Button";
 import { useAuth } from "@/lib/auth";
+import { validateUsername } from "@/lib/username";
 import { cn } from "@/lib/cn";
 import {
   AppleMark,
@@ -36,8 +37,9 @@ export default function SignupPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (username.trim().length < 2) {
-      setError("Pick a display name with at least 2 characters.");
+    const usernameError = validateUsername(username.trim());
+    if (usernameError) {
+      setError(usernameError);
       return;
     }
     if (!EMAIL_RE.test(email)) {

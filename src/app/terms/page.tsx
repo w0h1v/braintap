@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Card, Pill } from "@/components/ui/Card";
+import { SUPPORT_EMAIL } from "@/lib/support";
 
 export const metadata: Metadata = {
   title: "Terms — BrainTap Games",
@@ -101,8 +102,11 @@ const SECTIONS: { heading: string; body: React.ReactNode }[] = [
     heading: "Contact",
     body: (
       <>
-        Questions about these terms? Reach out to BrainTap Labs and we will be
-        happy to help.
+        Questions about these terms? Email BrainTap Labs at{" "}
+        <a href={`mailto:${SUPPORT_EMAIL}`} className="text-cyan hover:text-cyan-soft">
+          {SUPPORT_EMAIL}
+        </a>{" "}
+        and we will be happy to help.
       </>
     ),
   },
@@ -117,7 +121,7 @@ export default function TermsPage() {
           Terms of Use
         </h1>
         <p className="mt-4 font-mono text-[11px] tracking-[0.14em] text-ink-mute">
-          LAST UPDATED · JUNE 17, 2026
+          LAST UPDATED · JULY 7, 2026
         </p>
       </header>
 

@@ -11,7 +11,7 @@ import { useProgress, liveStreak } from "@/lib/progress";
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { user, enabled, loading, displayName, avatarLetter, signOut } = useAuth();
+  const { user, enabled, loading, displayName, avatarLetter, signOut, deleteAccount } = useAuth();
 
   const hydrated = useProgress((s) => s.hydrated);
   const results = useProgress((s) => s.results);
@@ -20,6 +20,9 @@ export default function ProfilePage() {
   const lastPlayedISO = useProgress((s) => s.lastPlayedISO);
 
   const [signingOut, setSigningOut] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const totalPlayed = useMemo(() => {
     let n = 0;
@@ -33,6 +36,19 @@ export default function ProfilePage() {
   async function onSignOut() {
     setSigningOut(true);
     await signOut();
+    router.push("/");
+    router.refresh();
+  }
+
+  async function onDeleteAccount() {
+    setDeleteError(null);
+    setDeleting(true);
+    const { error } = await deleteAccount();
+    if (error) {
+      setDeleteError(error);
+      setDeleting(false);
+      return;
+    }
     router.push("/");
     router.refresh();
   }
@@ -110,6 +126,48 @@ export default function ProfilePage() {
                 {signingOut ? "Signing out…" : "Sign out"}
               </GhostButton>
             </div>
+
+            <Card className="mt-7 p-6 sm:p-7">
+              <h2 className="font-display text-base font-semibold text-ink">Delete account</h2>
+              <p className="mt-2 text-sm leading-relaxed text-ink-mute">
+                Permanently deletes your account, synced results, streaks, and leaderboard
+                entries. Progress saved on this device stays on this device. This cannot be
+                undone.
+              </p>
+              {deleteError ? (
+                <p className="mt-3 rounded-xl border border-[#ff5c7a]/30 bg-[#ff5c7a]/[0.08] px-3.5 py-2.5 text-sm text-[#ff9db0]">
+                  {deleteError}
+                </p>
+              ) : null}
+              {confirmingDelete ? (
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={onDeleteAccount}
+                    disabled={deleting}
+                    className="rounded-xl border border-[#ff5c7a]/50 bg-[#ff5c7a]/[0.12] px-4 py-2.5 font-display text-sm font-semibold text-[#ff9db0] transition-colors hover:bg-[#ff5c7a]/[0.2] disabled:opacity-50"
+                  >
+                    {deleting ? "Deleting…" : "Yes, permanently delete"}
+                  </button>
+                  <GhostButton
+                    type="button"
+                    onClick={() => setConfirmingDelete(false)}
+                    disabled={deleting}
+                    className="sm:w-auto"
+                  >
+                    Cancel
+                  </GhostButton>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmingDelete(true)}
+                  className="mt-4 rounded-xl border border-line px-4 py-2.5 font-display text-sm font-semibold text-[#ff9db0] transition-colors hover:border-[#ff5c7a]/40"
+                >
+                  Delete account…
+                </button>
+              )}
+            </Card>
           </>
         ) : (
           <>

@@ -29,6 +29,8 @@ export interface AuthState {
   signInWithGoogle: () => Promise<{ error?: string }>;
   signInWithApple: () => Promise<{ error?: string }>;
   signOut: () => Promise<void>;
+  /** Permanently deletes the signed-in user's account and synced data. */
+  deleteAccount: () => Promise<{ error?: string }>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -138,6 +140,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, [supabase]);
 
+  const deleteAccount = useCallback<AuthState["deleteAccount"]>(async () => {
+    if (!supabase) return { error: "Accounts are not configured." };
+    // The edge function verifies the caller's JWT and deletes their auth user;
+    // profiles + game_results cascade away in the database.
+    const { error } = await supabase.functions.invoke("delete-account", { method: "POST" });
+    if (error) {
+      return { error: "Could not delete your account. Please try again in a moment." };
+    }
+    // The server-side user is gone; drop the now-orphaned local session.
+    await supabase.auth.signOut();
+    setUser(null);
+    return {};
+  }, [supabase]);
+
   const value = useMemo<AuthState>(() => {
     const displayName = nameFromUser(user);
     return {
@@ -151,8 +167,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithGoogle,
       signInWithApple,
       signOut,
+      deleteAccount,
     };
-  }, [user, loading, signInWithPassword, signUpWithPassword, signInWithGoogle, signInWithApple, signOut]);
+  }, [user, loading, signInWithPassword, signUpWithPassword, signInWithGoogle, signInWithApple, signOut, deleteAccount]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

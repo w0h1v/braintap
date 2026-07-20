@@ -1,7 +1,7 @@
 {
   "name": "BrainTap Games",
   "short_name": "BrainTap",
-  "description": "Fifteen science-backed brain games, one fresh challenge every day. Build a streak and watch your mind sharpen.",
+  "description": "Twenty science-backed brain games, one fresh challenge every day. Build a streak and watch your mind sharpen.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
