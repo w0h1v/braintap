@@ -68,14 +68,24 @@ function hasPremium(info: CustomerInfo): boolean {
 
 export function EntitlementProvider({ children }: { children: ReactNode }) {
   const native = Capacitor.isNativePlatform();
+  const configured = Boolean(
+    native && (Capacitor.getPlatform() === "ios" ? IOS_KEY : ANDROID_KEY),
+  );
   const { user } = useAuth(); // Supabase user → RevenueCat app-user-id (cross-device)
   const [isPremium, setIsPremium] = useState(false);
-  const [loading, setLoading] = useState(native);
+  const [loading, setLoading] = useState(configured);
 
   useEffect(() => {
     if (!native) return;
-    let alive = true;
     const apiKey = Capacitor.getPlatform() === "ios" ? IOS_KEY : ANDROID_KEY;
+    // No key configured for this platform → billing stays off. Never call
+    // configure with an empty key: the Android SDK throws on a native plugin
+    // thread and CRASHES the app (the JS catch below can't intercept it).
+    if (!apiKey) {
+      setLoading(false);
+      return;
+    }
+    let alive = true;
 
     (async () => {
       try {
@@ -133,12 +143,14 @@ export function EntitlementProvider({ children }: { children: ReactNode }) {
     }
   }, [native]);
 
+  // billingAvailable requires a platform SDK key: without one the store can't
+  // sell (and the archive must stay free rather than gate behind a dead paywall).
   const value = useMemo<Entitlement>(
     () =>
       native
-        ? { isPremium, loading, billingAvailable: true, purchase, restore }
+        ? { isPremium, loading, billingAvailable: configured, purchase, restore }
         : INERT,
-    [native, isPremium, loading, purchase, restore],
+    [native, configured, isPremium, loading, purchase, restore],
   );
 
   return (

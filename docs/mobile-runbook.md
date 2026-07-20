@@ -118,9 +118,17 @@ real apps (below).
    mode switches off automatically once both env ids are set). Also configure a
    **UMP consent message** for the app in the AdMob console — the client code
    already shows it when required.
-3. **Android shell.** `cap add android` needs a **JDK** (not installed on the
-   build machine). Install a JDK + Android Studio, then `npx cap add android` →
-   `npm run build:mobile && npx cap sync android`.
+3. **Android shell — GENERATED (2026-07-20).** `android/` is in the repo:
+   builds with Android Studio's bundled JBR
+   (`JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew assembleDebug`),
+   verified running on the Pixel 9 emulator (brand launcher icons + splash,
+   portrait-locked, test AdMob app id in the manifest). `npm run sync:android`
+   before building. Still needed for Play: a release **keystore**, Play Console
+   account ($25), real AdMob/RevenueCat Android ids, Data safety form, and
+   note Google's 12-tester/14-day closed-testing requirement for new personal
+   accounts. NB: the empty-RevenueCat-key crash on Android was fixed in
+   `src/lib/entitlement.tsx` (skip configure + `billingAvailable=false` when
+   the platform key is unset).
 4. **On-device test.** Open `ios/App/App.xcodeproj` in Xcode → run on a
    simulator/device, then exercise the flows by hand: Archive → a locked day →
    Paywall → purchase (StoreKit/Test Store sheet); use hints past the free
