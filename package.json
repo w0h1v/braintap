@@ -8,6 +8,7 @@
     "build": "next build",
     "build:mobile": "node scripts/build-mobile.mjs",
     "sync:ios": "npm run build:mobile && npx cap sync ios",
+    "sync:android": "npm run build:mobile && npx cap sync android",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
@@ -19,6 +20,7 @@
   },
   "dependencies": {
     "@capacitor-community/admob": "^8.0.0",
+    "@capacitor/android": "^8.4.2",
     "@capacitor/cli": "^8.4.1",
     "@capacitor/core": "^8.4.1",
     "@capacitor/ios": "^8.4.1",

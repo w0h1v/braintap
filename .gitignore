@@ -45,6 +45,7 @@ yarn-error.log*
 # ...but native app-icon/splash art must ship with the repo (the blanket *.png
 # above would otherwise leave clean checkouts/CI without icons)
 !ios/App/App/Assets.xcassets/**/*.png
+!android/app/src/main/res/**/*.png
 
 # playwright runtime outputs
 /test-results/
